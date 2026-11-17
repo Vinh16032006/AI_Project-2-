@@ -20,6 +20,13 @@ class GameEncoder:
         self.clauses.clear()
         self.next_variable_id = 1
 
+    def get_statistics(self) -> Dict[str, int]:
+        return {
+            "primary_variables": len(self.variable_map),
+            "auxiliary_variables": len(self.auxiliary_variable_map),
+            "clauses": len(self.clauses),
+        }
+
     def register_variable(self, name: str, value: Any) -> int:
         if name in self.variable_map:
             return self.variable_map[name]
@@ -134,7 +141,7 @@ class GameEncoder:
             if character is None:
                 raise ValueError("Verdict must contain a character identifier.")
 
-            character = str(character)
+            character = str(character).strip()
 
             if character not in self.variable_map:
                 raise ValueError(f"Unknown character in verdict: {character}")
@@ -161,8 +168,6 @@ class GameEncoder:
         return self.clauses
 
     def encode_clue(self, clue: Any) -> List[List[int]]:
-        """Chuyển một manh mối thành công thức CNF."""
-
         def get_value(obj: Any, key: str, default: Any = None) -> Any:
             if isinstance(obj, dict):
                 return obj.get(key, default)
@@ -181,7 +186,7 @@ class GameEncoder:
             if character is None:
                 raise ValueError("FACT clue must specify a character.")
 
-            character = str(character)
+            character = str(character).strip()
 
             if character not in self.variable_map:
                 raise ValueError(f"Unknown character: {character}")
@@ -333,7 +338,7 @@ class GameEncoder:
             variables = []
 
             for character in characters:
-                character = str(character)
+                character = str(character).strip()
 
                 if character not in self.variable_map:
                     raise ValueError(f"Unknown character: {character}")
@@ -378,7 +383,7 @@ class GameEncoder:
             variables = []
 
             for character in characters:
-                character = str(character)
+                character = str(character).strip()
 
                 if character not in self.variable_map:
                     raise ValueError(f"Unknown character: {character}")
@@ -569,7 +574,6 @@ class GameEncoder:
         literal = variable_id if is_criminal else -variable_id
 
         return [[literal]]
-
     
     def decode_model(self, model: Dict[int, bool]) -> Dict[str, bool]:
 
