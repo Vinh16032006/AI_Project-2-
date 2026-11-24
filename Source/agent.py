@@ -69,6 +69,28 @@ class HumanAgent(BaseAgent):
         super().__init__(name=name, **kwargs)
         self.input_handler = input_handler
 
+    def legal_moves(self, state: Any) -> list[Any]:
+        """Trả về danh sách nước đi hợp lệ hiện có trong trạng thái."""
+        if state is None:
+            return []
+
+        for getter_name in ("get_valid_moves", "valid_moves", "legal_moves"):
+            getter = getattr(state, getter_name, None)
+            if callable(getter):
+                result = getter()
+                if isinstance(result, (list, tuple, set)):
+                    return list(result)
+                if result is not None:
+                    return list(result)
+
+        if isinstance(state, dict):
+            for key in ("legal_moves", "valid_moves", "moves", "actions"):
+                value = state.get(key)
+                if value is not None:
+                    return list(value)
+
+        return []
+
     def choose_move(self, state: Any) -> Any:
         """Yêu cầu người dùng chọn một nước đi và trả về hành động tương ứng.
 
@@ -78,8 +100,35 @@ class HumanAgent(BaseAgent):
         Trả về:
             Một nước đi hợp lệ được người chơi lựa chọn.
         """
-        # TODO: lấy các nước đi hợp lệ từ state và hỏi người dùng/UI để chọn
-        raise NotImplementedError("TODO: triển khai xử lý đầu vào của người chơi")
+        moves = self.legal_moves(state)
+        if not moves:
+            raise ValueError("Không có nước đi hợp lệ nào cho human agent.")
+
+        if self.input_handler is not None:
+            raw_choice = self.input_handler(moves)
+            if isinstance(raw_choice, int):
+                if 0 <= raw_choice < len(moves):
+                    return moves[raw_choice]
+                raise ValueError("Vị trí nước đi người dùng chọn không hợp lệ.")
+            if raw_choice in moves:
+                return raw_choice
+            if str(raw_choice).isdigit():
+                index = int(str(raw_choice))
+                if 0 <= index < len(moves):
+                    return moves[index]
+            raise ValueError(f"Nước đi được chọn không hợp lệ: {raw_choice!r}")
+
+        while True:
+            prompt = "Chọn một nước đi: " + ", ".join(str(move) for move in moves) + "\n> "
+            response = input(prompt).strip()
+            if response.isdigit():
+                index = int(response)
+                if 0 <= index < len(moves):
+                    return moves[index]
+            for move in moves:
+                if str(move) == response:
+                    return move
+            print("Đầu vào không hợp lệ. Hãy chọn một nước đi có sẵn.")
 
 
 class RandomAgent(BaseAgent):
@@ -90,7 +139,24 @@ class RandomAgent(BaseAgent):
 
     def legal_moves(self, state: Any) -> list[Any]:
         """Trả về các nước đi hợp lệ từ trạng thái trò chơi hiện tại, nếu có."""
-        # TODO: gọi API của engine hoặc state để lấy danh sách nước đi hợp lệ
+        if state is None:
+            return []
+
+        for getter_name in ("get_valid_moves", "valid_moves", "legal_moves"):
+            getter = getattr(state, getter_name, None)
+            if callable(getter):
+                result = getter()
+                if isinstance(result, (list, tuple, set)):
+                    return list(result)
+                if result is not None:
+                    return list(result)
+
+        if isinstance(state, dict):
+            for key in ("legal_moves", "valid_moves", "moves", "actions"):
+                value = state.get(key)
+                if value is not None:
+                    return list(value)
+
         return []
 
     def choose_move(self, state: Any) -> Any:
@@ -121,5 +187,4 @@ def create_agent(agent_type: str, name: Optional[str] = None) -> BaseAgent:
     if normalized in {"random", "rand"}:
         return RandomAgent(name=name or "Random")
 
-    # TODO: thêm các chiến lược khác như minimax, MCTS, SAT-guided solver, ...
     raise ValueError(f"Loại agent không được hỗ trợ: {agent_type!r}")
