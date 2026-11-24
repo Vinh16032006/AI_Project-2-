@@ -18,6 +18,8 @@ from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 Clause = Sequence[int]
 Assignment = Dict[int, bool]
 
+class SATTimeout(Exception):
+    """Ném ra khi vượt quá thời gian cho phép."""
 
 @dataclass
 class DPLLResult:
@@ -73,9 +75,9 @@ def simplify_clause(clause: Clause, assignment: Assignment) -> List[int]:
 
 class DPLLSolver:
     """Bộ giải SAT dựa trên thuật toán DPLL hoàn chỉnh và tất định."""
-
-    def __init__(self, enable_pure_literal: bool = False) -> None:
+    def __init__(self, enable_pure_literal: bool = False, deadline: Optional[float] = None) -> None:
         self.enable_pure_literal = enable_pure_literal
+        self.deadline = deadline
         self.decisions = 0
         self.propagations = 0
         self.backtracks = 0
@@ -210,6 +212,9 @@ class DPLLSolver:
         self, clauses: List[List[int]], assignment: Assignment, all_vars: Set[int]
     ) -> Optional[Assignment]:
         """Hàm đệ quy chính của thuật toán DPLL với phân nhánh và quay lui."""
+        if self.deadline is not None and time.perf_counter() > self.deadline:
+            raise SATTimeout()
+
         # 1. Lan truyền đơn vị
         is_conflict, assignment = self._propagate(clauses, assignment)
         if is_conflict:
@@ -440,3 +445,33 @@ def check_uniqueness(
 
     is_unique = not res2.satisfiable
     return is_unique, first_model
+
+@dataclass
+class SATStats:
+
+    sat_calls: int = 0
+    decisions: int = 0
+    propagations: int = 0
+    backtracks: int = 0
+    runtime: float = 0.0
+
+
+class SATOracle:
+    """Bao quanh DPLLSolver, cộng dồn số liệu cho mọi lần gọi SAT."""
+
+    def __init__(self, enable_pure_literal: bool = False, timeout: Optional[float] = None) -> None:
+        self.enable_pure_literal = enable_pure_literal
+        self.deadline = None if timeout is None else time.perf_counter() + timeout
+        self.stats = SATStats()
+
+    def solve(self, cnf, assumptions=None, all_vars=None) -> DPLLResult:
+        solver = DPLLSolver(self.enable_pure_literal, self.deadline)
+        start = time.perf_counter()
+        self.stats.sat_calls += 1
+        try:
+            return solver.solve(cnf, all_vars=all_vars, assumptions=assumptions)
+        finally:
+            self.stats.decisions += solver.decisions
+            self.stats.propagations += solver.propagations
+            self.stats.backtracks += solver.backtracks
+            self.stats.runtime += time.perf_counter() - start

@@ -1,8 +1,9 @@
 from __future__ import annotations
+import re
+from typing import Any, Dict, List, Tuple 
+from Source.dpll import SATOracle
 
-from typing import Any, Dict, List
-
-
+CRIMINAL, INNOCENT, UNKNOWN, INCONSISTENT = "CRIMINAL", "INNOCENT", "UNKNOWN", "INCONSISTENT"
 class GameEncoder:
     def __init__(self, game_state: Any | None = None) -> None:
         self.game_state = game_state
@@ -36,7 +37,12 @@ class GameEncoder:
         self.reverse_variable_map[variable_id] = name
         return variable_id
 
-    
+    @staticmethod
+    def _cell_sort_key(name: str):
+        m = re.fullmatch(r"([A-Za-z]+)(\d+)", name)
+        if m:
+            return (0, int(m.group(2)), m.group(1).upper(), name)
+        return (1, 0, "", name)
     
     def build_variable_map(self, game_state: Any) -> None:
         self.reset(game_state)
@@ -67,13 +73,11 @@ class GameEncoder:
                     if name:
                         self.register_variable(name, None)
                     return
-
+        
                 if not any(key in character for key in ("id", "name")):
                     for value in character.values():
                         traverse_board(value)
-
                 return
-
             if hasattr(character, "character"):
                 register_character(character.character)
                 return
@@ -110,6 +114,13 @@ class GameEncoder:
             raise TypeError("Board must be a list, tuple, or dictionary.")
 
         traverse_board(board)
+
+        names = sorted(self.variable_map, key=self._cell_sort_key)
+        self.variable_map.clear()
+        self.reverse_variable_map.clear()
+        self.next_variable_id = 1
+        for name in names:
+            self.register_variable(name, None)
     
     def encode_game_state(self, game_state: Any) -> List[List[int]]:
         self.game_state = game_state
@@ -164,6 +175,8 @@ class GameEncoder:
             literal = variable_id if is_criminal else -variable_id
 
             self.clauses.append([literal])
+
+        _ = self.get_statistics()
 
         return self.clauses
 
@@ -622,3 +635,32 @@ def decode_model(
         )
 
     return encoder.decode_model(model)
+
+class KnowledgeBase:
+    def __init__(self, state: Any, oracle: SATOracle) -> None:
+        self.oracle = oracle
+        self.encoder = GameEncoder(state)
+        self.cnf: List[List[int]] = self.encoder.encode_game_state(state)   # KB_t
+        self.var: Dict[str, int] = self.encoder.variable_map
+        self.consistent: bool = oracle.solve(self.cnf).satisfiable
+
+    def stats(self) -> Dict[str, int]:
+        return self.encoder.get_statistics()
+
+    def classify(self, cid: str) -> Tuple[str, List[Dict[str, Any]]]:
+        if not self.consistent:
+            return INCONSISTENT, []
+        v = self.var[cid]
+        can_be_innocent = self.oracle.solve(self.cnf, assumptions=[-v]).satisfiable
+        can_be_criminal = self.oracle.solve(self.cnf, assumptions=[v]).satisfiable
+        queries = [
+            {"query": f"KB and not {cid}", "sat": can_be_innocent},
+            {"query": f"KB and {cid}", "sat": can_be_criminal},
+        ]
+        if can_be_innocent and can_be_criminal:
+            return UNKNOWN, queries
+        if can_be_criminal:
+            return CRIMINAL, queries      # không thể innocent -> KB |= criminal
+        if can_be_innocent:
+            return INNOCENT, queries
+        return INCONSISTENT, queries

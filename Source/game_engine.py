@@ -10,10 +10,8 @@ import copy
 import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
-
-from .dpll import dpll
-from .encoder import GameEncoder
-
+from .dpll import SATOracle, dpll, check_uniqueness
+from .encoder import GameEncoder, KnowledgeBase
 
 # =============================================================================
 # HẰNG SỐ TRẠNG THÁI VÀ KẾT QUẢ PHÁN QUYẾT
@@ -74,6 +72,7 @@ class GameEngine:
         enforce_logic: bool = True,
     ) -> None:
         self.enforce_logic: bool = enforce_logic
+        self.oracle: SATOracle = SATOracle()
         self._raw_puzzle_data: Dict[str, Any] = copy.deepcopy(
             puzzle_data if puzzle_data is not None else self._get_default_puzzle()
         )
@@ -461,28 +460,7 @@ class GameEngine:
         if secret["is_revealed"]:
             return secret["true_status"]
 
-        encoder = GameEncoder(self.state)
-        base_clauses = encoder.encode_game_state(self.state)
-
-        # Kiểm tra tính nhất quán của KB_t hiện tại
-        if dpll(copy.deepcopy(base_clauses)) is None:
-            return VERDICT_INCONSISTENT
-
-        # Giả sử nhân vật là INNOCENT (~C_i): nếu UNSAT thì bắt buộc là CRIMINAL
-        neg_clause = encoder.encode_move({"character": cid, "status": STATUS_INNOCENT}, self.state)
-        unsat_when_innocent = dpll(copy.deepcopy(base_clauses) + neg_clause) is None
-
-        # Giả sử nhân vật là CRIMINAL (C_i): nếu UNSAT thì bắt buộc là INNOCENT
-        pos_clause = encoder.encode_move({"character": cid, "status": STATUS_CRIMINAL}, self.state)
-        unsat_when_criminal = dpll(copy.deepcopy(base_clauses) + pos_clause) is None
-
-        if unsat_when_innocent and not unsat_when_criminal:
-            return STATUS_CRIMINAL
-        if unsat_when_criminal and not unsat_when_innocent:
-            return STATUS_INNOCENT
-        if unsat_when_innocent and unsat_when_criminal:
-            return VERDICT_INCONSISTENT
-        return STATUS_UNKNOWN
+        return KnowledgeBase(self.state, self.oracle).classify(cid)[0]
 
     def inspect_move(self, move: Any) -> Dict[str, Any]:
         """Đánh giá chi tiết một phán quyết và phân biệt rõ NOT_PROVABLE với CONTRADICTED."""
@@ -651,6 +629,28 @@ class GameEngine:
                     "active_clue_ids": [c.get("id") for c in self.state.revealed_clues],
                 }
         return None
+    def check_clue_set_uniqueness(self, include_starting_verdicts: bool = True) -> Dict[str, Any]:
+        encoder = GameEncoder(self.state)
+        encoder.build_variable_map(self.state)
+        clauses: List[List[int]] = []
+        for secret in self._secret_cells.values():
+            clue = secret.get("compiled_clue")
+            if clue is not None:
+                clauses.extend(encoder.encode_clue(clue))
+        assumptions: List[int] = []
+        if include_starting_verdicts:
+            for v in self.state.verdicts:
+                var = encoder.variable_map[v["character"]]
+                assumptions.append(var if v["status"] == STATUS_CRIMINAL else -var)
+        primary = sorted(encoder.variable_map.values())
+        unique, model = check_uniqueness(clauses, primary, assumptions)
+        matches = None
+        if model is not None:
+            matches = all(
+                model[encoder.variable_map[cid]] == (s["true_status"] == STATUS_CRIMINAL)
+                for cid, s in self._secret_cells.items()
+        )
+        return {"unique": unique, "matches_hidden_solution": matches, "clauses": len(clauses)}
 
     def check_winner(self, board: Optional[Dict[str, Dict[str, Any]]] = None) -> Optional[str]:
         """Xác định xem toàn bộ các ô trên bàn cờ đã được giải quyết hết chưa."""

@@ -5,10 +5,11 @@ Mục tiêu là giữ cho phần còn lại của dự án không phụ thuộc 
 cụ thể của một chiến lược, giúp AI, UI và engine trò chơi có thể phát triển độc lập.
 """
 from __future__ import annotations
-
 import random
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any, Optional, List, Dict
+from .dpll import SATOracle, SATTimeout
+from .encoder import CRIMINAL, INNOCENT, KnowledgeBase
 
 
 class BaseAgent(ABC):
@@ -169,6 +170,76 @@ class RandomAgent(BaseAgent):
             raise ValueError("Không có nước đi hợp lệ nào cho random agent.")
         return random.choice(moves)
 
+class DeductiveAgent(BaseAgent):
+    """Chỉ đọc state công khai, chỉ nộp verdict bị ép buộc."""
+
+    def __init__(self, engine: Any, oracle: Optional[SATOracle] = None, name: str = "Deductive", **kwargs: Any) -> None:
+        super().__init__(name=name, **kwargs)
+        self.engine = engine
+        self.oracle = oracle or engine.oracle
+        self.trace: List[Dict[str, Any]] = []
+        self.waves = 0
+        self.terminal: Optional[str] = None
+        self.max_stats = {"primary_variables": 0, "auxiliary_variables": 0, "clauses": 0}
+
+    def analyse(self, state: Any) -> Dict[str, Any]:
+        kb = KnowledgeBase(state, self.oracle)
+        for key, value in kb.stats().items():
+            self.max_stats[key] = max(self.max_stats.get(key, 0), value)
+        forced, unknown = [], []
+        for cid, cell in state.board.items():
+            if cell.get("is_revealed"):
+                continue
+            status, queries = kb.classify(cid)
+            if status in (CRIMINAL, INNOCENT):
+                forced.append({"character": cid, "status": status, "queries": queries})
+            else:
+                unknown.append(cid)
+        return {"consistent": kb.consistent, "forced": forced, "unknown": unknown}
+
+    def choose_move(self, state: Any) -> Any:
+        forced = self.analyse(state)["forced"]
+        if not forced:
+            raise ValueError("Không có verdict nào bị ép buộc.")
+        return {"character": forced[0]["character"], "status": forced[0]["status"]}
+
+    def hint(self) -> Optional[Dict[str, Any]]:
+        state = self.engine.state
+        forced = self.analyse(state)["forced"]
+        if not forced:
+            return None
+        item = forced[0]
+        return {"character": item["character"], "status": item["status"],
+                "active_clue_ids": [c.get("id") for c in state.revealed_clues]}
+
+    def run(self) -> str:
+        try:
+            while not self.engine.is_game_over():
+                analysis = self.analyse(self.engine.state)
+                if not analysis["consistent"]:
+                    self.terminal = "INCONSISTENT"
+                    return self.terminal
+                if not analysis["forced"]:
+                    self.terminal = "STUCK"
+                    return self.terminal
+                self.waves += 1                      # một đợt = tất cả verdict ép buộc hiện tại
+                for item in analysis["forced"]:
+                    active = [c.get("id") for c in self.engine.state.revealed_clues]
+                    result = self.engine.submit_verdict(item["character"], item["status"])
+                    if result["result"] != "ACCEPTED":
+                        self.terminal = "REJECTED"
+                        return self.terminal
+                    clue = result.get("revealed_clue") or {}
+                    self.trace.append({
+                        "step": len(self.trace) + 1, "wave": self.waves,
+                        "active_clue_ids": active, "sat_queries": item["queries"],
+                        "character": item["character"], "verdict": item["status"],
+                        "revealed_clue": clue.get("id"), "revealed_clue_text": clue.get("text"),
+                    })
+            self.terminal = "SOLVED"
+        except SATTimeout:
+            self.terminal = "TIMEOUT"
+        return self.terminal
 
 def create_agent(agent_type: str, name: Optional[str] = None) -> BaseAgent:
     """Factory để khởi tạo một đối tượng agent cụ thể.

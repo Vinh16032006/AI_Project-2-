@@ -496,6 +496,40 @@ def test_variable_map_does_not_duplicate_characters() -> None:
     }
     assert len(encoder.variable_map) == 2
 
+def test_variable_map_is_stable_across_dict_order() -> None:
+    encoder_1 = GameEncoder()
+    encoder_2 = GameEncoder()
+
+    game_state_1 = {
+        "board": {
+            "A1": {"id": "A1"},
+            "B1": {"id": "B1"},
+            "A2": {"id": "A2"},
+        },
+        "revealed_clues": [],
+        "verdicts": [],
+    }
+
+    game_state_2 = {
+        "board": {
+            "A2": {"id": "A2"},
+            "A1": {"id": "A1"},
+            "B1": {"id": "B1"},
+        },
+        "revealed_clues": [],
+        "verdicts": [],
+    }
+
+    encoder_1.build_variable_map(game_state_1)
+    encoder_2.build_variable_map(game_state_2)
+
+    assert encoder_1.variable_map == encoder_2.variable_map
+    assert encoder_1.variable_map == {
+        "A1": 1,
+        "B1": 2,
+        "A2": 3,
+    }
+
 def test_decode_model_returns_character_assignments() -> None:
     encoder = GameEncoder()
     encoder.variable_map = {
