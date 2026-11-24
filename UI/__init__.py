@@ -1,6 +1,4 @@
-"""Gói giao diện desktop cho hệ thống UI."""
-
-from .components import BoardPanel, StatusBar
-from .main_window import MainWindow
-
-__all__ = ["BoardPanel", "StatusBar", "MainWindow"]
+"""Griductive UI package."""
+from .components import BoardPanel, COLORS
+from .main_window import MainWindow, MockGameEngine
+__all__=["BoardPanel","COLORS","MainWindow","MockGameEngine"]
