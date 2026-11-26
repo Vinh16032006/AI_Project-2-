@@ -1,564 +1,573 @@
-from __future__ import annotations
+"""Cửa sổ chính của Griductive.
 
-import random
+Lớp `GriductiveApp` chỉ làm "keo dán": nhận thao tác của người chơi, gọi API công khai
+của `GameEngine`, rồi đẩy kết quả sang các component trong `components.py`.
+Không có luật chơi hay suy luận nào nằm ở đây.
+
+API của engine được sử dụng:
+    engine.state.board / .revealed_clues / .moves / .turn / .size / .verdicts
+    engine.submit_verdict(cell_id, status)   -> dict {valid, result, message, ...}
+    engine.get_hint()                        -> dict {character, name, status} | None
+    engine.get_highlighted_cells(cell_id)    -> vùng của manh mối thuộc ô đã lật
+    engine.evaluate_state() / is_game_over() -> tiến độ / kết thúc
+    engine.reset() / load_puzzle(data)       -> Restart / Load puzzle
+    engine.oracle.stats                      -> số liệu SAT solver (DPLL)
+
+Auto solve dùng `Source.agent.DeductiveAgent` (agent.py KHÔNG bị sửa):
+    agent.analyse(state)  -> {consistent, forced[{character, status, queries}], unknown}
+`DeductiveAgent.run()` giải một mạch nên không thể làm animation; vì vậy lớp
+`AutoSolveSession` bên dưới lặp lại đúng logic của run() nhưng mỗi lần chỉ nộp MỘT verdict,
+đồng thời ghi vào agent.trace / agent.waves / agent.terminal như run() vẫn làm.
+"""
+import json
+import sys
+from pathlib import Path
+
+
+def _ensure_project_root() -> Path:
+    """Tìm thư mục gốc (chứa package `Source`) và đưa vào sys.path."""
+    here = Path(__file__).resolve().parent
+    for candidate in (here, *here.parents):
+        if (candidate / "Source").is_dir():
+            root = candidate
+            break
+    else:
+        root = here.parent
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    return root
+
+
+PROJECT_ROOT = _ensure_project_root()
+
 import tkinter as tk
-from dataclasses import dataclass, field
-from tkinter import messagebox
-from typing import Any, Optional
+from tkinter import filedialog, messagebox
+from typing import Any, Dict, Optional
+
+from Source.agent import DeductiveAgent
+from Source.dpll import SATTimeout
+from Source.game_engine import (
+    GameEngine,
+    STATUS_CRIMINAL,
+    STATUS_INNOCENT,
+    VERDICT_ACCEPTED,
+    VERDICT_ALREADY_REVEALED,
+    VERDICT_CONTRADICTED,
+    VERDICT_INCONSISTENT,
+    VERDICT_INVALID,
+    VERDICT_NOT_PROVABLE,
+)
 
 try:
-    from Source.game_engine import GameEngine
-except (ImportError, ModuleNotFoundError):
-    GameEngine = None  # type: ignore[assignment]
-
-try:
-    from UI.components import BoardPanel, StatusBar, COLORS
-except (ImportError, ModuleNotFoundError):
-    from components import BoardPanel, StatusBar, COLORS
-
-
-@dataclass
-class MockClue:
-    text: str
-    related_cells: list[tuple[int, int]] = field(default_factory=list)
+    from components import (
+        BG, BoardPanel, CluePanel, HeaderBar, HistoryPanel, InfoPanel, Legend,
+        ProgressStrip, SolverPanel, StatusBar, TabView, TracePanel, VictoryOverlay, apply_theme,
+    )
+except ImportError:  # chạy dạng package: python -m GUI.main_window
+    from .components import (
+        BG, BoardPanel, CluePanel, HeaderBar, HistoryPanel, InfoPanel, Legend,
+        ProgressStrip, SolverPanel, StatusBar, TabView, TracePanel, VictoryOverlay, apply_theme,
+    )
 
 
-@dataclass
-class MockCell:
-    name: str
-    profession: str
-    solution: str
-    clue: MockClue
-    avatar_colors: tuple[str, str, str]
-    hair_style: int = 0
-    revealed: bool = False
-    verdict: Optional[str] = None
-    starter: bool = False
+# Mã kết quả của engine -> (tiêu đề ngắn, loại thông báo của StatusBar / HistoryPanel)
+RESULT_UI = {
+    VERDICT_ACCEPTED: ("Ruling accepted", "success"),
+    VERDICT_NOT_PROVABLE: ("Not provable yet", "warn"),
+    VERDICT_CONTRADICTED: ("Contradicted", "error"),
+    VERDICT_ALREADY_REVEALED: ("Already ruled", "info"),
+    VERDICT_INVALID: ("Invalid move", "error"),
+    VERDICT_INCONSISTENT: ("Inconsistent knowledge base", "error"),
+}
+
+ARROW_STEPS = {"Left": (-1, 0), "Right": (1, 0), "Up": (0, -1), "Down": (0, 1)}
+
+# Thời gian dừng giữa hai bước Auto solve (ms) theo SpeedControl
+AUTO_DELAY_MS = {"Slow": 1300, "Normal": 750, "Fast": 250}
+
+# Trạng thái kết thúc của DeductiveAgent -> (loại thông báo, nội dung)
+AUTO_END = {
+    "SOLVED": ("success", "Auto solve finished: every suspect was ruled by logic alone."),
+    "STUCK": ("warn", "Auto solve stopped: no remaining verdict is forced by the revealed clues."),
+    "INCONSISTENT": ("error", "Auto solve stopped: the knowledge base is inconsistent."),
+    "REJECTED": ("error", "Auto solve stopped: the engine rejected a verdict the agent believed was forced."),
+    "TIMEOUT": ("error", "Auto solve stopped: the SAT solver timed out."),
+}
 
 
-@dataclass
-class MockState:
-    board: list[list[MockCell]]
-    solved: int = 0
-    mistakes: int = 0
+class AutoSolveSession:
+    """Chạy vòng lặp của `DeductiveAgent.run()` từng verdict một.
+
+    - Dùng lại `agent.analyse()` (phân loại bằng SAT) và `engine.submit_verdict()`.
+    - Một "đợt" (wave) = tất cả verdict ép buộc tại thời điểm phân tích; các verdict trong
+      đợt được nộp lần lượt, hết đợt mới phân tích lại, y hệt run().
+    - Bản ghi trace có cùng khoá với run(): step, wave, active_clue_ids, sat_queries,
+      character, verdict, revealed_clue, revealed_clue_text.
+    """
+
+    def __init__(self, engine: GameEngine):
+        self.engine = engine
+        self.agent = DeductiveAgent(engine)
+        self._queue: list = []
+
+    def step(self) -> Optional[Dict[str, Any]]:
+        """Nộp đúng một verdict. Trả về bản ghi trace, hoặc None khi dừng (xem agent.terminal)."""
+        agent = self.agent
+        if agent.terminal is not None:
+            return None
+        try:
+            if not self._queue:
+                if self.engine.is_game_over():
+                    agent.terminal = "SOLVED"
+                    return None
+                analysis = agent.analyse(self.engine.state)
+                if not analysis["consistent"]:
+                    agent.terminal = "INCONSISTENT"
+                    return None
+                if not analysis["forced"]:
+                    agent.terminal = "STUCK"
+                    return None
+                agent.waves += 1
+                self._queue = list(analysis["forced"])
+
+            item = self._queue.pop(0)
+            active = [c.get("id") for c in self.engine.state.revealed_clues]
+            result = self.engine.submit_verdict(item["character"], item["status"])
+            if result["result"] != "ACCEPTED":
+                self._queue.clear()
+                agent.terminal = "REJECTED"
+                return None
+            clue = result.get("revealed_clue") or {}
+            entry = {
+                "step": len(agent.trace) + 1, "wave": agent.waves,
+                "active_clue_ids": active, "sat_queries": item["queries"],
+                "character": item["character"], "verdict": item["status"],
+                "revealed_clue": clue.get("id"), "revealed_clue_text": clue.get("text"),
+            }
+            agent.trace.append(entry)
+            return entry
+        except SATTimeout:
+            self._queue.clear()
+            agent.terminal = "TIMEOUT"
+            return None
 
 
-class MockGameEngine:
-    """Engine mô phỏng để giao diện có thể chạy độc lập."""
+class GriductiveApp(tk.Tk):
 
-    NAMES = [
-        "Ada", "Bea", "Cody", "Dana",
-        "Evan", "Finn", "Gus", "Hannah",
-        "Ike", "Jonas", "Kobe", "Lucy",
-        "Mason", "Nina", "Otis", "Paul",
-        "Quilla", "Roy", "Senna", "Theo",
-    ]
-    PROFESSIONS = [
-        "Keeper", "Driver", "Host", "Writer",
-        "Driver", "Grocer", "Driver", "Writer",
-        "Fitter", "Driver", "Grocer", "Host",
-        "Writer", "Taster", "Keeper", "Taster",
-        "Host", "Grocer", "Grocer", "Fitter",
-    ]
-    AVATAR_COLORS = [
-        ("#A85C36", "#42231E", "#222222"),
-        ("#9B654B", "#6B3D31", "#E5AD09"),
-        ("#D3A172", "#C18B45", "#E9F2F1"),
-        ("#B66C4A", "#5A2C24", "#E49A3A"),
-        ("#C99A70", "#E4C37B", "#1F7C42"),
-        ("#825437", "#B77A36", "#173F85"),
-        ("#B96F50", "#A54E25", "#174A91"),
-        ("#E7B792", "#251713", "#E6538B"),
-    ]
+    def __init__(self):
+        super().__init__()
+        self.title("Griductive")
+        self._place_window(1360, 860)
+        self.minsize(1120, 720)
+        apply_theme(self)
 
-    def __init__(self) -> None:
-        self.starter_cell: Optional[tuple[int, int]] = None
-        self.state = self._create_state()
+        self.engine = GameEngine()
+        self.selected = None          # mã ô đang chọn, vd "B1"
+        self.hint_cell = None         # mã ô đang được gợi ý
+        self._victory_job = None
 
-    def _create_state(self) -> MockState:
-        solutions = [
-            "INNOCENT", "INNOCENT", "CRIMINAL", "INNOCENT",
-            "CRIMINAL", "INNOCENT", "CRIMINAL", "INNOCENT",
-            "INNOCENT", "CRIMINAL", "INNOCENT", "CRIMINAL",
-            "INNOCENT", "INNOCENT", "CRIMINAL", "INNOCENT",
-            "CRIMINAL", "INNOCENT", "INNOCENT", "CRIMINAL",
-        ]
-        board: list[list[MockCell]] = []
+        self.session: Optional[AutoSolveSession] = None   # phiên Auto solve gần nhất
+        self.auto_running = False
+        self._auto_job = None
+        self.agent_stats: Optional[Dict[str, int]] = None  # agent.max_stats của phiên gần nhất
 
-        for row in range(5):
-            board_row: list[MockCell] = []
-            for col in range(4):
-                index = row * 4 + col
-                related = self._adjacent_cells(row, col)
-                innocent_count = sum(
-                    solutions[r * 4 + c] == "INNOCENT" for r, c in related
-                )
-                clue_text = (
-                    f"Exactly {innocent_count} adjacent "
-                    f"card{'s are' if innocent_count != 1 else ' is'} innocent."
-                )
-                board_row.append(
-                    MockCell(
-                        name=self.NAMES[index],
-                        profession=self.PROFESSIONS[index],
-                        solution=solutions[index],
-                        clue=MockClue(clue_text, related),
-                        avatar_colors=self.AVATAR_COLORS[index % len(self.AVATAR_COLORS)],
-                        hair_style=index % 4,
-                    )
-                )
-            board.append(board_row)
+        self._build_layout()
+        self._bind_keys()
+        self.refresh_ui()
+        self.status.set("Pick a suspect to read their file. Rule only when the clues prove it.", "info")
 
-        state = MockState(board=board)
-        self._reveal_random_starter(state)
-        return state
+    # ------------------------------------------------------------------ layout
+    def _place_window(self, width: int, height: int) -> None:
+        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        width, height = min(width, sw - 80), min(height, sh - 120)
+        self.geometry(f"{width}x{height}+{(sw - width) // 2}+{max((sh - height) // 3, 0)}")
 
-    @staticmethod
-    def _adjacent_cells(row: int, col: int) -> list[tuple[int, int]]:
-        result = []
-        for delta_row, delta_col in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-            new_row = row + delta_row
-            new_col = col + delta_col
-            if 0 <= new_row < 5 and 0 <= new_col < 4:
-                result.append((new_row, new_col))
-        return result
+    def _build_layout(self) -> None:
+        self.grid_rowconfigure(1, weight=1)
+        self.grid_columnconfigure(0, weight=1)
 
-    def _reveal_random_starter(self, state: MockState) -> None:
-        row, col = random.choice(
-            [(r, c) for r in range(5) for c in range(4)]
-        )
-        cell = state.board[row][col]
-        cell.revealed = True
-        cell.verdict = cell.solution
-        cell.starter = True
-        state.solved = 1
-        self.starter_cell = (row, col)
+        self.header = HeaderBar(
+            self, on_load=self.load_puzzle, on_restart=self.restart,
+            on_hint=self.show_hint, on_auto=self.toggle_auto_solve)
+        self.header.grid(row=0, column=0, sticky="ew")
 
-    def reset(self) -> None:
-        self.state = self._create_state()
+        body = tk.Frame(self, bg=BG)
+        body.grid(row=1, column=0, sticky="nsew")
+        body.grid_rowconfigure(0, weight=1)
+        body.grid_columnconfigure(0, weight=1)
 
-    def submit_verdict(self, row: int, col: int, verdict: str) -> str:
-        cell = self.state.board[row][col]
-        if cell.revealed:
-            return "ALREADY_REVEALED"
-        if cell.solution != verdict:
-            self.state.mistakes += 1
-            return "CONTRADICTED"
+        # --- cột trái: tiến độ, bàn cờ, chú giải ---
+        left = tk.Frame(body, bg=BG)
+        left.grid(row=0, column=0, sticky="nsew", padx=(24, 12), pady=(16, 14))
+        left.grid_rowconfigure(1, weight=1)
+        left.grid_columnconfigure(0, weight=1)
 
-        cell.revealed = True
-        cell.verdict = verdict
-        self.state.solved += 1
-        return "ACCEPTED"
+        self.progress = ProgressStrip(left)
+        self.progress.grid(row=0, column=0, sticky="ew")
+        self.board = BoardPanel(left, self.engine, self.select_cell)
+        self.board.grid(row=1, column=0, sticky="nsew")
+        self.legend = Legend(left)
+        self.legend.grid(row=2, column=0, pady=(6, 0))
+        self.victory = VictoryOverlay(left, on_restart=self.restart)
 
-    def hint(self) -> Optional[tuple[int, int]]:
-        hidden_cells = [
-            (row, col)
-            for row, board_row in enumerate(self.state.board)
-            for col, cell in enumerate(board_row)
-            if not cell.revealed
-        ]
-        return random.choice(hidden_cells) if hidden_cells else None
+        # --- cột phải: hồ sơ nhân vật + tab Clues / Trace / History / Solver ---
+        right = tk.Frame(body, bg=BG, width=400)
+        right.grid(row=0, column=1, sticky="ns", padx=(12, 24), pady=(16, 14))
+        right.pack_propagate(False)
 
+        self.info_panel = InfoPanel(right, on_verdict=self.submit)
+        self.info_panel.pack(fill="x")
 
-class VerdictDialog(tk.Toplevel):
-    """Hộp thoại chọn INNOCENT hoặc CRIMINAL cho một thẻ."""
+        self.tabs = TabView(right)
+        self.tabs.pack(fill="both", expand=True, pady=(12, 0))
+        self.clue_panel = CluePanel(self.tabs.add("Clues"), on_select=self.select_cell)
+        self.clue_panel.pack(fill="both", expand=True)
+        self.trace_panel = TracePanel(self.tabs.add("Trace"), on_select=self.select_cell,
+                                      on_export=self.export_trace)
+        self.trace_panel.pack(fill="both", expand=True)
+        self.history = HistoryPanel(self.tabs.add("History"))
+        self.history.pack(fill="both", expand=True)
+        self.solver = SolverPanel(self.tabs.add("Solver"))
+        self.solver.pack(fill="both", expand=True)
 
-    def __init__(
-        self,
-        parent: tk.Misc,
-        cell: Any,
-        coordinate: str,
-        callback: Any,
-    ) -> None:
-        super().__init__(parent)
-        self.callback = callback
-        self.title("Mark card")
-        self.configure(bg=COLORS["page"])
-        self.resizable(False, False)
-        self.transient(parent)
-        self.grab_set()
+        self.status = StatusBar(self)
+        self.status.grid(row=2, column=0, sticky="ew")
 
-        width, height = 360, 290
-        parent.update_idletasks()
-        x = parent.winfo_rootx() + parent.winfo_width() // 2 - width // 2
-        y = parent.winfo_rooty() + parent.winfo_height() // 2 - height // 2
-        self.geometry(f"{width}x{height}+{x}+{y}")
+    def _bind_keys(self) -> None:
+        self.bind("<Key>", self._on_key)
+        self.bind("<Control-o>", lambda _e: self.load_puzzle())
 
-        tk.Label(
-            self,
-            text=coordinate,
-            bg=COLORS["page"],
-            fg=COLORS["muted"],
-            font=("Segoe UI", 10, "bold"),
-        ).pack(pady=(24, 4))
-        tk.Label(
-            self,
-            text=getattr(cell, "name", "Unknown"),
-            bg=COLORS["page"],
-            fg=COLORS["ink"],
-            font=("Segoe UI", 22, "bold"),
-        ).pack()
-        tk.Label(
-            self,
-            text=getattr(cell, "profession", "Unknown"),
-            bg=COLORS["page"],
-            fg=COLORS["muted"],
-            font=("Consolas", 10, "bold"),
-        ).pack(pady=(2, 20))
-        tk.Label(
-            self,
-            text="What can you logically conclude?",
-            bg=COLORS["page"],
-            fg=COLORS["ink"],
-            font=("Segoe UI", 11),
-        ).pack()
+    # ------------------------------------------------------------ đồng bộ UI
+    def refresh_ui(self, animate=None) -> None:
+        """Vẽ lại mọi thứ từ trạng thái công khai của engine."""
+        state = self.engine.state
+        board = state.board
+        total = len(board)
+        solved = sum(1 for cell in board.values() if cell.get("is_revealed"))
 
-        button_frame = tk.Frame(self, bg=COLORS["page"])
-        button_frame.pack(fill="x", padx=28, pady=18)
-        self._create_button(
-            button_frame,
-            "INNOCENT",
-            COLORS["innocent"],
-            lambda: self._choose("INNOCENT"),
-        ).pack(side="left", expand=True, fill="x", padx=(0, 5))
-        self._create_button(
-            button_frame,
-            "CRIMINAL",
-            COLORS["criminal"],
-            lambda: self._choose("CRIMINAL"),
-        ).pack(side="left", expand=True, fill="x", padx=(5, 0))
+        self.progress.update_progress(solved, total, state.turn, self.engine.evaluate_state())
+        self.board.refresh(animate=animate)
 
-        tk.Button(
-            self,
-            text="Cancel",
-            command=self.destroy,
-            bg=COLORS["page"],
-            fg=COLORS["muted"],
-            activebackground=COLORS["page"],
-            relief="flat",
-            cursor="hand2",
-        ).pack()
+        newest = state.moves[-1]["character"] if state.moves else None
+        self.clue_panel.update_clues(state.revealed_clues, board, newest_owner=newest)
+        self.tabs.set_badge("Clues", len(state.revealed_clues))
+        self.tabs.set_badge("Trace", self.trace_panel.count)
+        self.tabs.set_badge("History", self.history.count)
 
-    @staticmethod
-    def _create_button(parent: tk.Misc, text: str, color: str, command: Any) -> tk.Button:
-        return tk.Button(
-            parent,
-            text=text,
-            command=command,
-            bg=color,
-            fg="white",
-            activebackground=color,
-            activeforeground="white",
-            font=("Segoe UI", 10, "bold"),
-            relief="flat",
-            borderwidth=0,
-            pady=11,
-            cursor="hand2",
-        )
+        stats = getattr(self.engine.oracle, "stats", None)
+        data = {key: getattr(stats, key, 0)
+                for key in ("sat_calls", "decisions", "propagations", "backtracks", "runtime")}
+        data.update(clues=len(state.revealed_clues), verdicts=len(state.verdicts), hidden=total - solved)
+        peak = self.agent_stats or {}
+        for key in ("primary_variables", "auxiliary_variables", "clauses"):
+            data[key] = peak.get(key)          # None -> "-" cho tới khi chạy Auto solve
+        self.solver.update_stats(data)
 
-    def _choose(self, verdict: str) -> None:
-        self.destroy()
-        self.callback(verdict)
+        self._update_controls()
+        self._sync_view()
 
+    def _update_controls(self) -> None:
+        over = self.engine.is_game_over()
+        self.header.set_hint_enabled(not over and not self.auto_running)
+        self.header.set_auto_state(self.auto_running, enabled=self.auto_running or not over)
 
-class MainWindow:
-    """Cửa sổ cấp cao nhất, kết nối UI với game engine."""
-
-    def __init__(
-        self,
-        root: Optional[Any] = None,
-        game_engine: Optional[Any] = None,
-    ) -> None:
-        self.root = root or tk.Tk()
-        self.root.title("Griductive")
-        self.root.geometry("690x900")
-        self.root.minsize(590, 760)
-        self.root.configure(bg=COLORS["page"])
-
-        if game_engine is not None:
-            self.game_engine = game_engine
-        elif GameEngine is not None:
+    def _sync_view(self) -> None:
+        """Đồng bộ ô đang chọn: hồ sơ, vùng highlight của manh mối, danh sách clue."""
+        cid = self.selected
+        cell = self.engine.state.board.get(cid) if cid else None
+        highlighted = []
+        if cell is not None and cell.get("is_revealed"):
             try:
-                self.game_engine = GameEngine()
-            except Exception:
-                self.game_engine = MockGameEngine()
+                highlighted = self.engine.get_highlighted_cells(cid)
+            except KeyError:
+                highlighted = []
+        locked = self.engine.is_game_over() or self.auto_running
+        self.info_panel.show_cell(cell, locked=locked)
+        self.board.set_view(selected=cid if cell else None, highlighted=highlighted, hint=self.hint_cell)
+        self.clue_panel.set_active(cid if cell is not None and cell.get("is_revealed") else None)
+
+    # --------------------------------------------------------------- thao tác
+    def select_cell(self, cid: str) -> None:
+        if cid not in self.engine.state.board:
+            return
+        self.selected = cid
+        self._sync_view()
+
+    def submit(self, verdict: str) -> None:
+        """Nộp phán quyết CRIMINAL / INNOCENT cho ô đang chọn."""
+        if self.auto_running:
+            self.status.set("Auto solve is running. Stop it to rule manually.", "warn")
+            return
+        if self.engine.is_game_over():
+            return
+        if self.selected is None:
+            self.status.set("Select a suspect on the board first.", "warn")
+            return
+
+        cid = self.selected
+        result = self.engine.submit_verdict(cid, verdict)
+        code = result.get("result")
+        title, kind = RESULT_UI.get(code, ("Result", "info"))
+        message = result.get("message", "")
+
+        self.status.set(message, kind)
+        accepted = bool(result.get("valid"))
+        turn = self.engine.state.turn
+        self.history.add(kind, title, message, step=f"Move {turn}" if accepted else "")
+
+        if accepted:
+            self.hint_cell = None
+            self.refresh_ui(animate=cid)
+            if self.engine.is_game_over():
+                self._schedule_victory()
         else:
-            self.game_engine = MockGameEngine()
-
-        self.board_panel: Optional[BoardPanel] = None
-        self.status_bar: Optional[StatusBar] = None
-        self.selected_cell: Optional[tuple[int, int]] = None
-        self.counter_label: Optional[tk.Label] = None
-
-        self.build_ui()
-        self.bind_events()
-        self.refresh()
-        self.root.after(200, self._show_starter_clue)
-
-    def build_ui(self) -> None:
-        """Xây dựng bố cục giao diện."""
-        header = tk.Frame(self.root, bg=COLORS["page"])
-        header.pack(fill="x", padx=18, pady=(12, 4))
-
-        tk.Label(
-            header,
-            text="GRIDUCTIVE",
-            bg=COLORS["page"],
-            fg=COLORS["ink"],
-            font=("Segoe UI", 17, "bold"),
-        ).pack(side="left")
-
-        self.counter_label = tk.Label(
-            header,
-            text="",
-            bg=COLORS["page"],
-            fg=COLORS["muted"],
-            font=("Segoe UI", 9, "bold"),
-        )
-        self.counter_label.pack(side="right")
-
-        board_container = tk.Frame(self.root, bg=COLORS["page"])
-        board_container.pack(fill="both", expand=True, padx=18, pady=4)
-        self.board_panel = BoardPanel(board_container, width=650, height=750)
-
-        controls = tk.Frame(self.root, bg=COLORS["page"])
-        controls.pack(pady=(5, 8))
-        self._create_control_button(controls, "✎  Mark", self.mark_selected).pack(
-            side="left", padx=5
-        )
-        self._create_control_button(controls, "◔  Hint", self.show_hint).pack(
-            side="left", padx=5
-        )
-        self._create_control_button(controls, "↻  Restart", self.start_new_game).pack(
-            side="left", padx=5
-        )
-
-        self.status_bar = StatusBar(self.root)
-        self.update_status("Game ready")
-
-    def _create_control_button(
-        self,
-        parent: tk.Misc,
-        text: str,
-        command: Any,
-    ) -> tk.Button:
-        return tk.Button(
-            parent,
-            text=text,
-            command=command,
-            bg=COLORS["card"],
-            fg=COLORS["ink"],
-            activebackground=COLORS["selected"],
-            activeforeground=COLORS["ink"],
-            font=("Segoe UI", 10, "bold"),
-            relief="solid",
-            borderwidth=2,
-            padx=20,
-            pady=7,
-            cursor="hand2",
-        )
-
-    def bind_events(self) -> None:
-        """Kết nối callback bằng API bind_click ban đầu."""
-        if self.board_panel is not None:
-            self.board_panel.bind_click(self.handle_board_click)
-        self.root.bind("<Control-r>", lambda _event: self.start_new_game())
-        self.root.bind("<Escape>", lambda _event: self.clear_selection())
-
-    def refresh(self) -> None:
-        if self.board_panel is not None:
-            self.board_panel.render(self.game_engine.state)
-
-        board = getattr(self.game_engine.state, "board", [])
-        total = sum(len(row) for row in board)
-        solved = getattr(self.game_engine.state, "solved", self._count_revealed(board))
-        mistakes = getattr(self.game_engine.state, "mistakes", 0)
-        if self.counter_label is not None:
-            self.counter_label.config(
-                text=f"{solved}/{total} solved  •  {mistakes} errors"
-            )
-
-    @staticmethod
-    def _count_revealed(board: Any) -> int:
-        return sum(
-            bool(getattr(cell, "revealed", False))
-            for row in board
-            for cell in row
-        )
-
-    def start_new_game(self) -> None:
-        """Reset game và tự động hiển thị manh mối mở đầu ngẫu nhiên."""
-        self.game_engine.reset()
-        self.selected_cell = None
-        if self.board_panel is not None:
-            self.board_panel.selected_cell = None
-            self.board_panel.highlighted_cells.clear()
-        self.refresh()
-        self._show_starter_clue()
-
-    def _show_starter_clue(self) -> None:
-        starter = getattr(self.game_engine, "starter_cell", None)
-        if starter is None:
-            starter = self._find_revealed_starter()
-        if starter is None:
-            self.update_status("Game started. Select a card to make a deduction.")
-            return
-
-        row, col = starter
-        cell = self.game_engine.state.board[row][col]
-        related = self._get_related_cells(cell)
-        if self.board_panel is not None:
-            self.board_panel.set_selected(row, col)
-            self.board_panel.set_highlighted(related)
-        self.selected_cell = (row, col)
-        self.update_status(
-            f"Starter clue opened at {chr(65 + col)}{row + 1}: "
-            f"{self._get_clue_text(cell)}"
-        )
-
-    def _find_revealed_starter(self) -> Optional[tuple[int, int]]:
-        board = getattr(self.game_engine.state, "board", [])
-        for row, board_row in enumerate(board):
-            for col, cell in enumerate(board_row):
-                if getattr(cell, "starter", False):
-                    return row, col
-        for row, board_row in enumerate(board):
-            for col, cell in enumerate(board_row):
-                if getattr(cell, "revealed", False):
-                    return row, col
-        return None
-
-    def handle_board_click(self, event: Any) -> None:
-        """Nhận event từ BoardPanel.bind_click() và xử lý thẻ được chọn."""
-        row = getattr(event, "board_row", None)
-        col = getattr(event, "board_col", None)
-
-        if row is None or col is None:
-            if self.board_panel is None:
-                return
-            position = self.board_panel.get_clicked_cell(event.x, event.y)
-            if position is None:
-                return
-            row, col = position
-
-        self.selected_cell = (row, col)
-        if self.board_panel is not None:
-            self.board_panel.set_selected(row, col)
-
-        cell = self.game_engine.state.board[row][col]
-        if getattr(cell, "revealed", False):
-            related = self._get_related_cells(cell)
-            if self.board_panel is not None:
-                self.board_panel.set_highlighted(related)
-            self.update_status(self._get_clue_text(cell))
-            return
-
-        if self.board_panel is not None:
-            self.board_panel.clear_highlight()
-        self._open_verdict_dialog(row, col)
-
-    def mark_selected(self) -> None:
-        if self.selected_cell is None:
-            self.update_status("Choose an unrevealed card first.")
-            return
-
-        row, col = self.selected_cell
-        cell = self.game_engine.state.board[row][col]
-        if getattr(cell, "revealed", False):
-            self.update_status("This card is already open.")
-            return
-        self._open_verdict_dialog(row, col)
-
-    def _open_verdict_dialog(self, row: int, col: int) -> None:
-        cell = self.game_engine.state.board[row][col]
-        coordinate = f"{chr(65 + col)}{row + 1}"
-        VerdictDialog(
-            self.root,
-            cell,
-            coordinate,
-            lambda verdict: self._submit_verdict(row, col, verdict),
-        )
-
-    def _submit_verdict(self, row: int, col: int, verdict: str) -> None:
-        result = self.game_engine.submit_verdict(row, col, verdict)
-        self.refresh()
-
-        if result == "ACCEPTED":
-            cell = self.game_engine.state.board[row][col]
-            related = self._get_related_cells(cell)
-            if self.board_panel is not None:
-                self.board_panel.set_selected(row, col)
-                self.board_panel.set_highlighted(related)
-            self.update_status(
-                f"Correct deduction. Clue: {self._get_clue_text(cell)}"
-            )
-        elif result == "CONTRADICTED":
-            self.update_status("CONTRADICTED: that conclusion does not follow.")
-        elif result == "NOT_PROVABLE":
-            self.update_status("NOT PROVABLE: more evidence is required.")
-        elif result == "ALREADY_REVEALED":
-            self.update_status("This card is already open.")
-        else:
-            self.update_status(f"Engine response: {result}")
-
-        board = getattr(self.game_engine.state, "board", [])
-        total = sum(len(board_row) for board_row in board)
-        if self._count_revealed(board) == total and total > 0:
-            messagebox.showinfo(
-                "Griductive",
-                "All cards have been resolved.",
-                parent=self.root,
-            )
+            self.refresh_ui()
+            self.board.shake(cid)
 
     def show_hint(self) -> None:
-        hint_method = getattr(self.game_engine, "hint", None)
-        if hint_method is None:
-            self.update_status("Hint is not supported by the current engine.")
+        if self.auto_running:
             return
-
-        hint = hint_method()
+        if self.engine.is_game_over():
+            self.status.set("The puzzle is already solved.", "info")
+            return
+        hint = self.engine.get_hint()
         if hint is None:
-            self.update_status("All cards are already open.")
+            message = "The revealed clues don't prove anyone yet."
+            self.status.set(message, "warn")
+            self.history.add("warn", "No hint available", message)
+            self.refresh_ui()
             return
 
-        if isinstance(hint, tuple) and len(hint) >= 2:
-            row, col = int(hint[0]), int(hint[1])
-            self.selected_cell = (row, col)
-            if self.board_panel is not None:
-                self.board_panel.set_selected(row, col)
-            self.update_status(
-                f"Consider card {chr(65 + col)}{row + 1} and the revealed clues."
-            )
+        cid = hint["character"]
+        message = f"Hint: {hint['name']} ({cid}) is provably {hint['status'].lower()}."
+        self.selected = cid
+        self.hint_cell = cid
+        self.status.set(message, "hint")
+        self.history.add("hint", "Hint", message)
+        self.refresh_ui()
+
+    def restart(self) -> None:
+        self._stop_auto(announce=False)
+        if self.engine.state.turn > 0 and not self.engine.is_game_over():
+            if not messagebox.askyesno(
+                    "Restart", "Discard your progress and start this puzzle again?", parent=self):
+                return
+        self.engine.reset()
+        self._reset_session("Puzzle restarted.")
+
+    def load_puzzle(self) -> None:
+        self._stop_auto(announce=False)
+        path = filedialog.askopenfilename(
+            parent=self, title="Load puzzle", initialdir=str(PROJECT_ROOT),
+            filetypes=[("Puzzle JSON", "*.json"), ("All files", "*.*")])
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            GameEngine(puzzle_data=data)      # dựng thử để bắt lỗi dữ liệu trước khi đụng vào game hiện tại
+        except Exception as exc:
+            messagebox.showerror(
+                "Could not load puzzle",
+                f"{Path(path).name}\n\n{exc}\n\nYour current game was not changed.", parent=self)
+            return
+        self.engine.load_puzzle(data)
+        self._reset_session(f"Loaded {Path(path).name}.")
+
+    def _reset_session(self, message: str) -> None:
+        if self._victory_job is not None:
+            self.after_cancel(self._victory_job)
+            self._victory_job = None
+        self._cancel_auto()
+        self.session = None
+        self.agent_stats = None
+        self.victory.hide()
+        self.selected = None
+        self.hint_cell = None
+        self.history.clear()
+        self.trace_panel.clear()
+        self.board.rebuild()
+        self.refresh_ui()
+        self.status.set(message, "info")
+
+    # --------------------------------------------------------------- Auto solve
+    def toggle_auto_solve(self) -> None:
+        if self.auto_running:
+            self._stop_auto()
         else:
-            self.update_status(str(hint))
+            self.start_auto_solve()
 
-    def clear_selection(self) -> None:
-        self.selected_cell = None
-        if self.board_panel is not None:
-            self.board_panel.set_selected(None, None)
-            self.board_panel.clear_highlight()
-        self.update_status("Selection cleared.")
+    def start_auto_solve(self) -> None:
+        """Chạy DeductiveAgent từng bước: mỗi bước chỉ nộp verdict mà các clue đã lật ép buộc."""
+        if self.engine.is_game_over():
+            self.status.set("The puzzle is already solved.", "info")
+            return
+        self.session = AutoSolveSession(self.engine)
+        self.agent_stats = None
+        self.hint_cell = None
+        self.auto_running = True
+        self.trace_panel.clear()
+        self.trace_panel.set_state("RUNNING", "Submitting only verdicts that the revealed clues force.")
+        self.tabs.select("Trace")
+        self.status.set("Auto solve started. Only logically forced verdicts are submitted.", "info")
+        self.refresh_ui()
+        self._auto_job = self.after(350, self._auto_step)
 
-    @staticmethod
-    def _get_related_cells(cell: Any) -> list[tuple[int, int]]:
-        clue = getattr(cell, "clue", None)
-        related = getattr(clue, "related_cells", []) if clue is not None else []
-        return [tuple(position) for position in related]
+    def _auto_step(self) -> None:
+        self._auto_job = None
+        if not self.auto_running or self.session is None:
+            return
+        try:
+            entry = self.session.step()
+        except Exception as exc:       # lỗi bất ngờ: dừng hẳn thay vì để chuỗi after chết âm thầm
+            self._finish_auto(error=exc)
+            return
+        if entry is None:
+            self._finish_auto()
+            return
 
-    @staticmethod
-    def _get_clue_text(cell: Any) -> str:
-        clue = getattr(cell, "clue", None)
-        if clue is None:
-            return "No clue available."
-        return str(getattr(clue, "text", clue))
+        cid, verdict = entry["character"], entry["verdict"]
+        name = self.engine.state.board.get(cid, {}).get("name", cid)
+        text = f"{name} ({cid}) is {verdict.lower()}."
+        self.selected = cid
+        self.status.set(f"Step {entry['step']}: {text} Forced by the revealed clues.", "success")
+        self.history.add("success", "Auto solve", text, step=f"Move {self.engine.state.turn}")
+        self.trace_panel.add_step(entry, name)
+        self.refresh_ui(animate=cid)
 
-    def update_status(self, message: str) -> None:
-        if self.status_bar is not None:
-            self.status_bar.set_text(message)
+        delay = 450 if self.engine.is_game_over() else AUTO_DELAY_MS.get(self.header.speed.get(), 750)
+        self._auto_job = self.after(delay, self._auto_step)
 
-    def run(self) -> None:
-        self.root.mainloop()
+    def _finish_auto(self, error: Optional[Exception] = None) -> None:
+        self._auto_job = None
+        self.auto_running = False
+        session = self.session
+        board = self.engine.state.board
+        hidden = sum(1 for cell in board.values() if not cell.get("is_revealed"))
+
+        if session is not None:
+            self.agent_stats = dict(session.agent.max_stats)
+            steps, waves = len(session.agent.trace), session.agent.waves
+        else:
+            steps = waves = 0
+
+        if error is not None:
+            kind, text, key = "error", f"Auto solve failed: {error}", "ERROR"
+            summary = str(error)
+        else:
+            terminal = session.agent.terminal if session is not None else None
+            key = terminal or "STOPPED"
+            kind, text = AUTO_END.get(terminal, ("info", "Auto solve stopped."))
+            summary = f"{steps} steps in {waves} waves."
+            if terminal != "SOLVED":
+                summary += f" {hidden} suspects still hidden."
+
+        self.trace_panel.set_state(key, summary)
+        self.status.set(text, kind)
+        self.history.add(kind, "Auto solve", summary)
+        self.refresh_ui()
+        if key == "SOLVED" and self.engine.is_game_over():
+            self._schedule_victory()
+
+    def _cancel_auto(self) -> None:
+        if self._auto_job is not None:
+            self.after_cancel(self._auto_job)
+            self._auto_job = None
+        self.auto_running = False
+
+    def _stop_auto(self, announce: bool = True) -> None:
+        """Người dùng dừng Auto solve (nút Stop, Restart, Load). Không làm gì nếu đang không chạy."""
+        if not self.auto_running:
+            return
+        self._cancel_auto()
+        steps = waves = 0
+        if self.session is not None:
+            self.agent_stats = dict(self.session.agent.max_stats)
+            steps, waves = len(self.session.agent.trace), self.session.agent.waves
+        self.trace_panel.set_state("STOPPED", f"Stopped after {steps} steps in {waves} waves.")
+        if announce:
+            self.status.set("Auto solve stopped.", "info")
+        self.refresh_ui()
+
+    def export_trace(self) -> None:
+        """Lưu deduction trace (và số liệu solver) ra JSON để đưa vào báo cáo."""
+        agent = self.session.agent if self.session is not None else None
+        if agent is None or not agent.trace:
+            self.status.set("Run Auto solve first to record a deduction trace.", "warn")
+            return
+        path = filedialog.asksaveasfilename(
+            parent=self, title="Export deduction trace", defaultextension=".json",
+            initialfile="deduction_trace.json", filetypes=[("JSON", "*.json")])
+        if not path:
+            return
+        stats = getattr(self.engine.oracle, "stats", None)
+        payload = {
+            "grid_size": self.engine.state.size,
+            "terminal": agent.terminal or "STOPPED",
+            "steps": len(agent.trace),
+            "waves": agent.waves,
+            "cnf_peak": dict(agent.max_stats),
+            "sat": {key: getattr(stats, key, 0)
+                    for key in ("sat_calls", "decisions", "propagations", "backtracks", "runtime")},
+            "trace": agent.trace,
+        }
+        try:
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, ensure_ascii=False, indent=2)
+        except OSError as exc:
+            messagebox.showerror("Could not export trace", str(exc), parent=self)
+            return
+        self.status.set(f"Trace exported to {Path(path).name}.", "success")
+
+    # --------------------------------------------------------------- chiến thắng
+    def _schedule_victory(self) -> None:
+        if self._victory_job is not None:
+            self.after_cancel(self._victory_job)
+        self._victory_job = self.after(560, self._show_victory)   # chờ hiệu ứng lật thẻ xong
+
+    def _show_victory(self) -> None:
+        self._victory_job = None
+        self.victory.show(total=len(self.engine.state.board), turns=self.engine.state.turn)
+        self.status.set("Case closed. Every suspect was ruled by logic alone.", "success")
+
+    # ------------------------------------------------------------------ phím tắt
+    def _on_key(self, event) -> None:
+        if event.state & 0x4:            # bỏ qua tổ hợp Ctrl+phím (vd Ctrl+C)
+            return
+        key = event.keysym
+        if key in ARROW_STEPS:
+            self._move_selection(*ARROW_STEPS[key])
+            return
+        low = key.lower()
+        if low == "c":
+            self.submit(STATUS_CRIMINAL)
+        elif low == "i":
+            self.submit(STATUS_INNOCENT)
+        elif low == "h":
+            self.show_hint()
+        elif low == "a":
+            self.toggle_auto_solve()
+        elif low == "r":
+            self.restart()
+        elif key == "Escape" and self.selected is not None:
+            self.selected = None
+            self._sync_view()
+
+    def _move_selection(self, dc: int, dr: int) -> None:
+        board = self.engine.state.board
+        if not board:
+            return
+        if self.selected not in board:
+            self.select_cell(next(iter(board)))
+            return
+        cell = board[self.selected]
+        size = self.engine.state.size
+        col = min(max(ord(cell["col"]) - ord("A") + dc, 0), size - 1)
+        row = min(max(int(cell["row"]) - 1 + dr, 0), size - 1)
+        target = f"{chr(ord('A') + col)}{row + 1}"
+        if target in board:
+            self.select_cell(target)
 
 
 if __name__ == "__main__":
-    MainWindow().run()
+    GriductiveApp().mainloop()
