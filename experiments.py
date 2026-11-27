@@ -34,7 +34,7 @@ COLUMNS = [
     "puzzle", "size", "config", "status",
     "primary_vars", "aux_vars", "clauses",
     "sat_calls", "decisions", "propagations", "backtracks",
-    "steps", "waves", "runtime_s", "unique",
+    "steps", "waves", "runtime_s", "unique", "expected",
 ]
 
 
@@ -46,12 +46,15 @@ def run_once(path: str, pure_literal: bool, timeout: float) -> Dict[str, Any]:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         row["size"] = data.get("size", "")
+        row["expected"] = data.get("meta", {}).get("expected", "SOLVED")
 
         engine = GameEngine(puzzle_data=data)
         # Uniqueness kiểm tra bằng một oracle riêng để không tính vào số liệu của agent.
         row["unique"] = bool(engine.check_clue_set_uniqueness()["unique"])
 
-        engine.oracle = SATOracle(enable_pure_literal=pure_literal, timeout=timeout)
+        # Puzzle có thể khai báo timeout riêng (meta.timeout) để cố tình gây TIMEOUT.
+        case_timeout = float(data.get("meta", {}).get("timeout", timeout))
+        engine.oracle = SATOracle(enable_pure_literal=pure_literal, timeout=case_timeout)
         agent = DeductiveAgent(engine)
         start = time.perf_counter()
         status = agent.run()
@@ -73,6 +76,8 @@ def run_once(path: str, pure_literal: bool, timeout: float) -> Dict[str, Any]:
         })
     except Exception as exc:                      # ghi lại thay vì bỏ ca lỗi
         row["status"] = f"ERROR:{type(exc).__name__}"
+        if not row["expected"]:
+            row["expected"] = "ERROR"
     return row
 
 

@@ -186,7 +186,8 @@ def generate_puzzle(size: int, seed: int, max_iters: int = 400) -> Optional[Tupl
     return None
 
 
-def make_set(size: int, count: int, base_seed: int, out_dir: str) -> List[Dict[str, Any]]:
+def make_set(size: int, count: int, base_seed: int, out_dir: str,
+             failures: bool = True) -> List[Dict[str, Any]]:
     reports = []
     seed = base_seed
     made = 0
@@ -200,6 +201,9 @@ def make_set(size: int, count: int, base_seed: int, out_dir: str) -> List[Dict[s
         data, report = result
         made += 1
         data["meta"] = {"seed": seed, "size": size}
+        fault = FAULTS.get((size, made)) if failures else None
+        if fault:
+            inject_failure(data, fault)
         path = os.path.join(out_dir, f"{size}x{size}_{made:02d}.json")
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -212,12 +216,34 @@ def make_set(size: int, count: int, base_seed: int, out_dir: str) -> List[Dict[s
     return reports
 
 
+# Vị trí (size, thứ tự) trong bộ puzzle sẽ bị cố tình làm hỏng -> thành ca thất bại.
+FAULTS = {(3, 4): "STUCK", (3, 5): "ERROR", (4, 5): "TIMEOUT"}
+
+
+def inject_failure(data: Dict[str, Any], kind: str) -> None:
+    """Biến một puzzle hợp lệ thành ca thất bại; ghi `meta.expected` để đối chiếu."""
+    if kind == "STUCK":                        # mọi clue vô nghĩa -> agent kẹt
+        for c in data["cells"]:
+            c["clue"] = {"type": "AT_LEAST", "count": 0,
+                         "region": {"type": "NEIGHBORS", "params": c["id"]},
+                         "text": f"At least 0 neighbors of {c['name']} ({c['id']}) are Criminals."}
+    elif kind == "ERROR":                      # loại clue không tồn tại -> exception
+        for c in data["cells"]:
+            if c["is_revealed"]:
+                c["clue"] = {"type": "BOGUS", "text": "This clue type does not exist."}
+    elif kind == "TIMEOUT":                    # timeout SAT cực nhỏ (experiments.py đọc meta.timeout)
+        data["meta"]["timeout"] = 1e-6
+    data["meta"]["expected"] = kind
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sinh bộ puzzle Griductive.")
     parser.add_argument("--out", default="puzzles", help="Thư mục xuất file JSON")
     parser.add_argument("--seed", type=int, default=2026, help="Seed gốc")
     parser.add_argument("--counts", nargs="*", default=["3:5", "4:5", "5:1"],
                         help="Danh sách kích thước:số_lượng, ví dụ 3:5 4:5 5:1")
+    parser.add_argument("--no-failures", action="store_true",
+                        help="Không cài các ca thất bại (STUCK/ERROR/TIMEOUT) vào bộ puzzle")
     args = parser.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
@@ -225,7 +251,7 @@ def main() -> None:
         size_str, count_str = item.split(":")
         size, count = int(size_str), int(count_str)
         print(f"Sinh {count} puzzle {size}x{size} ...")
-        make_set(size, count, args.seed + size * 1000, args.out)
+        make_set(size, count, args.seed + size * 1000, args.out, not args.no_failures)
 
 
 if __name__ == "__main__":
