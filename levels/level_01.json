@@ -1,0 +1,148 @@
+{
+  "size": 3,
+  "cells": [
+    {
+      "id": "A1",
+      "name": "Yara",
+      "profession": "Writer",
+      "status": "CRIMINAL",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 1,
+        "region": {
+          "type": "ROW",
+          "params": 2
+        },
+        "text": "Exactly 1 person in Row 2 is a Criminal."
+      }
+    },
+    {
+      "id": "B1",
+      "name": "Abel",
+      "profession": "Tailor",
+      "status": "CRIMINAL",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 2,
+        "region": {
+          "type": "NEIGHBORS",
+          "params": "B1"
+        },
+        "text": "Exactly 2 neighbors of Abel (B1) are Criminals."
+      }
+    },
+    {
+      "id": "C1",
+      "name": "Victor",
+      "profession": "Detective",
+      "status": "INNOCENT",
+      "is_revealed": true,
+      "clue": {
+        "type": "DIFFERENT",
+        "character1": "C1",
+        "character2": "A2",
+        "text": "Victor (C1) and Theo (A2) have different statuses."
+      }
+    },
+    {
+      "id": "A2",
+      "name": "Theo",
+      "profession": "Pilot",
+      "status": "CRIMINAL",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 2,
+        "region": {
+          "type": "ROW",
+          "params": 1
+        },
+        "text": "Exactly 2 people in Row 1 are Criminals."
+      }
+    },
+    {
+      "id": "B2",
+      "name": "Eliza",
+      "profession": "Writer",
+      "status": "INNOCENT",
+      "is_revealed": false,
+      "clue": {
+        "type": "SAME",
+        "character1": "B2",
+        "character2": "C2",
+        "text": "Eliza (B2) and Jade (C2) have the same statuses."
+      }
+    },
+    {
+      "id": "C2",
+      "name": "Jade",
+      "profession": "Tailor",
+      "status": "INNOCENT",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 3,
+        "region": {
+          "type": "NEIGHBORS",
+          "params": "C2"
+        },
+        "text": "Exactly 3 neighbors of Jade (C2) are Criminals."
+      }
+    },
+    {
+      "id": "A3",
+      "name": "Bea",
+      "profession": "Detective",
+      "status": "INNOCENT",
+      "is_revealed": false,
+      "clue": {
+        "type": "AT_LEAST",
+        "count": 2,
+        "region": {
+          "type": "NEIGHBORS",
+          "params": "A3"
+        },
+        "text": "At least 2 neighbors of Bea (A3) are Criminals."
+      }
+    },
+    {
+      "id": "B3",
+      "name": "Nina",
+      "profession": "Guard",
+      "status": "CRIMINAL",
+      "is_revealed": false,
+      "clue": {
+        "type": "AT_MOST",
+        "count": 2,
+        "region": {
+          "type": "NEIGHBORS",
+          "params": "B3"
+        },
+        "text": "At most 2 neighbors of Nina (B3) are Criminals."
+      }
+    },
+    {
+      "id": "C3",
+      "name": "Senna",
+      "profession": "Guard",
+      "status": "CRIMINAL",
+      "is_revealed": false,
+      "clue": {
+        "type": "AT_MOST",
+        "count": 1,
+        "region": {
+          "type": "NEIGHBORS",
+          "params": "C3"
+        },
+        "text": "At most 1 neighbors of Senna (C3) are Criminals."
+      }
+    }
+  ],
+  "meta": {
+    "seed": 5027,
+    "size": 3,
+    "level": 1
+  }
+}

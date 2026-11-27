@@ -1,0 +1,248 @@
+{
+  "size": 4,
+  "cells": [
+    {
+      "id": "A1",
+      "name": "Nina",
+      "profession": "Detective",
+      "status": "CRIMINAL",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 1,
+        "region": {
+          "type": "COL",
+          "params": "B"
+        },
+        "text": "Exactly 1 person in Column B is a Criminal."
+      }
+    },
+    {
+      "id": "B1",
+      "name": "Victor",
+      "profession": "Guard",
+      "status": "INNOCENT",
+      "is_revealed": false,
+      "clue": {
+        "type": "FACT",
+        "character": "B4",
+        "status": "INNOCENT",
+        "text": "Roy (B4) is Innocent."
+      }
+    },
+    {
+      "id": "C1",
+      "name": "Eliza",
+      "profession": "Guard",
+      "status": "CRIMINAL",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 2,
+        "region": {
+          "type": "ROW",
+          "params": 2
+        },
+        "text": "Exactly 2 people in Row 2 are Criminals."
+      }
+    },
+    {
+      "id": "D1",
+      "name": "Franz",
+      "profession": "Pilot",
+      "status": "CRIMINAL",
+      "is_revealed": false,
+      "clue": {
+        "type": "SAME",
+        "character1": "D1",
+        "character2": "C4",
+        "text": "Franz (D1) and Jade (C4) have the same statuses."
+      }
+    },
+    {
+      "id": "A2",
+      "name": "Theo",
+      "profession": "Farmer",
+      "status": "INNOCENT",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 2,
+        "region": {
+          "type": "ROW",
+          "params": 2
+        },
+        "text": "Exactly 2 people in Row 2 are Criminals."
+      }
+    },
+    {
+      "id": "B2",
+      "name": "Wendy",
+      "profession": "Painter",
+      "status": "CRIMINAL",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 3,
+        "region": {
+          "type": "NEIGHBORS",
+          "params": "B2"
+        },
+        "text": "Exactly 3 neighbors of Wendy (B2) are Criminals."
+      }
+    },
+    {
+      "id": "C2",
+      "name": "Xavier",
+      "profession": "Nurse",
+      "status": "CRIMINAL",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 3,
+        "region": {
+          "type": "COL",
+          "params": "C"
+        },
+        "text": "Exactly 3 people in Column C are Criminals."
+      }
+    },
+    {
+      "id": "D2",
+      "name": "Otis",
+      "profession": "Writer",
+      "status": "INNOCENT",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 3,
+        "region": {
+          "type": "NEIGHBORS",
+          "params": "D2"
+        },
+        "text": "Exactly 3 neighbors of Otis (D2) are Criminals."
+      }
+    },
+    {
+      "id": "A3",
+      "name": "Paula",
+      "profession": "Guard",
+      "status": "INNOCENT",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 3,
+        "region": {
+          "type": "ROW",
+          "params": 1
+        },
+        "text": "Exactly 3 people in Row 1 are Criminals."
+      }
+    },
+    {
+      "id": "B3",
+      "name": "Abel",
+      "profession": "Painter",
+      "status": "INNOCENT",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 0,
+        "region": {
+          "type": "ROW",
+          "params": 3
+        },
+        "text": "Exactly 0 people in Row 3 are Criminals."
+      }
+    },
+    {
+      "id": "C3",
+      "name": "Mason",
+      "profession": "Farmer",
+      "status": "INNOCENT",
+      "is_revealed": false,
+      "clue": {
+        "type": "FACT",
+        "character": "D2",
+        "status": "INNOCENT",
+        "text": "Otis (D2) is Innocent."
+      }
+    },
+    {
+      "id": "D3",
+      "name": "Derek",
+      "profession": "Nurse",
+      "status": "INNOCENT",
+      "is_revealed": true,
+      "clue": {
+        "type": "SAME",
+        "character1": "D3",
+        "character2": "B1",
+        "text": "Derek (D3) and Victor (B1) have the same statuses."
+      }
+    },
+    {
+      "id": "A4",
+      "name": "Lucy",
+      "profession": "Driver",
+      "status": "CRIMINAL",
+      "is_revealed": false,
+      "clue": {
+        "type": "SAME",
+        "character1": "A4",
+        "character2": "C4",
+        "text": "Lucy (A4) and Jade (C4) have the same statuses."
+      }
+    },
+    {
+      "id": "B4",
+      "name": "Roy",
+      "profession": "Nurse",
+      "status": "INNOCENT",
+      "is_revealed": false,
+      "clue": {
+        "type": "DIFFERENT",
+        "character1": "B4",
+        "character2": "A4",
+        "text": "Roy (B4) and Lucy (A4) have different statuses."
+      }
+    },
+    {
+      "id": "C4",
+      "name": "Jade",
+      "profession": "Tailor",
+      "status": "CRIMINAL",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 0,
+        "region": {
+          "type": "NEIGHBORS",
+          "params": "C4"
+        },
+        "text": "Exactly 0 neighbors of Jade (C4) are Criminals."
+      }
+    },
+    {
+      "id": "D4",
+      "name": "Hannah",
+      "profession": "Farmer",
+      "status": "INNOCENT",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 1,
+        "region": {
+          "type": "NEIGHBORS",
+          "params": "D4"
+        },
+        "text": "Exactly 1 neighbor of Hannah (D4) is a Criminal."
+      }
+    }
+  ],
+  "meta": {
+    "seed": 6030,
+    "size": 4,
+    "level": 8
+  }
+}

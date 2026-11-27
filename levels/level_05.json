@@ -1,0 +1,266 @@
+{
+  "size": 4,
+  "cells": [
+    {
+      "id": "A1",
+      "name": "Clara",
+      "profession": "Writer",
+      "status": "INNOCENT",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 2,
+        "region": {
+          "type": "ROW",
+          "params": 4
+        },
+        "text": "Exactly 2 people in Row 4 are Criminals."
+      }
+    },
+    {
+      "id": "B1",
+      "name": "Kobe",
+      "profession": "Detective",
+      "status": "INNOCENT",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 4,
+        "region": {
+          "type": "COL",
+          "params": "C"
+        },
+        "text": "Exactly 4 people in Column C are Criminals."
+      }
+    },
+    {
+      "id": "C1",
+      "name": "Mason",
+      "profession": "Driver",
+      "status": "CRIMINAL",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 2,
+        "region": {
+          "type": "NEIGHBORS",
+          "params": "C1"
+        },
+        "text": "Exactly 2 neighbors of Mason (C1) are Criminals."
+      }
+    },
+    {
+      "id": "D1",
+      "name": "Hannah",
+      "profession": "Astronaut",
+      "status": "INNOCENT",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 2,
+        "region": {
+          "type": "NEIGHBORS",
+          "params": "D1"
+        },
+        "text": "Exactly 2 neighbors of Hannah (D1) are Criminals."
+      }
+    },
+    {
+      "id": "A2",
+      "name": "Abel",
+      "profession": "Writer",
+      "status": "INNOCENT",
+      "is_revealed": false,
+      "clue": {
+        "type": "AT_LEAST",
+        "count": 1,
+        "region": {
+          "type": "NEIGHBORS",
+          "params": "A2"
+        },
+        "text": "At least 1 neighbors of Abel (A2) are Criminals."
+      }
+    },
+    {
+      "id": "B2",
+      "name": "Roy",
+      "profession": "Astronaut",
+      "status": "CRIMINAL",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 3,
+        "region": {
+          "type": "NEIGHBORS",
+          "params": "B2"
+        },
+        "text": "Exactly 3 neighbors of Roy (B2) are Criminals."
+      }
+    },
+    {
+      "id": "C2",
+      "name": "Xavier",
+      "profession": "Detective",
+      "status": "CRIMINAL",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 4,
+        "region": {
+          "type": "COL",
+          "params": "C"
+        },
+        "text": "Exactly 4 people in Column C are Criminals."
+      }
+    },
+    {
+      "id": "D2",
+      "name": "Victor",
+      "profession": "Guard",
+      "status": "INNOCENT",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 2,
+        "region": {
+          "type": "ROW",
+          "params": 4
+        },
+        "text": "Exactly 2 people in Row 4 are Criminals."
+      }
+    },
+    {
+      "id": "A3",
+      "name": "Theo",
+      "profession": "Astronaut",
+      "status": "INNOCENT",
+      "is_revealed": true,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 4,
+        "region": {
+          "type": "COL",
+          "params": "C"
+        },
+        "text": "Exactly 4 people in Column C are Criminals."
+      }
+    },
+    {
+      "id": "B3",
+      "name": "Lucy",
+      "profession": "Cook",
+      "status": "INNOCENT",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 4,
+        "region": {
+          "type": "NEIGHBORS",
+          "params": "B3"
+        },
+        "text": "Exactly 4 neighbors of Lucy (B3) are Criminals."
+      }
+    },
+    {
+      "id": "C3",
+      "name": "Uma",
+      "profession": "Writer",
+      "status": "CRIMINAL",
+      "is_revealed": false,
+      "clue": {
+        "type": "AT_LEAST",
+        "count": 5,
+        "region": {
+          "type": "NEIGHBORS",
+          "params": "C3"
+        },
+        "text": "At least 5 neighbors of Uma (C3) are Criminals."
+      }
+    },
+    {
+      "id": "D3",
+      "name": "Bea",
+      "profession": "Cook",
+      "status": "CRIMINAL",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 2,
+        "region": {
+          "type": "ROW",
+          "params": 2
+        },
+        "text": "Exactly 2 people in Row 2 are Criminals."
+      }
+    },
+    {
+      "id": "A4",
+      "name": "Senna",
+      "profession": "Baker",
+      "status": "INNOCENT",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 2,
+        "region": {
+          "type": "ROW",
+          "params": 2
+        },
+        "text": "Exactly 2 people in Row 2 are Criminals."
+      }
+    },
+    {
+      "id": "B4",
+      "name": "Jade",
+      "profession": "Writer",
+      "status": "INNOCENT",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 2,
+        "region": {
+          "type": "NEIGHBORS",
+          "params": "B4"
+        },
+        "text": "Exactly 2 neighbors of Jade (B4) are Criminals."
+      }
+    },
+    {
+      "id": "C4",
+      "name": "Paula",
+      "profession": "Nurse",
+      "status": "CRIMINAL",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 3,
+        "region": {
+          "type": "NEIGHBORS",
+          "params": "C4"
+        },
+        "text": "Exactly 3 neighbors of Paula (C4) are Criminals."
+      }
+    },
+    {
+      "id": "D4",
+      "name": "Derek",
+      "profession": "Painter",
+      "status": "CRIMINAL",
+      "is_revealed": false,
+      "clue": {
+        "type": "AT_MOST",
+        "count": 3,
+        "region": {
+          "type": "NEIGHBORS",
+          "params": "D4"
+        },
+        "text": "At most 3 neighbors of Derek (D4) are Criminals."
+      }
+    }
+  ],
+  "meta": {
+    "seed": 6027,
+    "size": 4,
+    "level": 5
+  }
+}

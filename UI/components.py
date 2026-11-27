@@ -1,19 +1,3 @@
-"""Các thành phần giao diện (UI components) cho Griductive.
-
-File này chỉ chứa phần "nhìn" và "cảm giác" của ứng dụng. Mọi luật chơi vẫn nằm
-trong `Source/game_engine.py`; các component ở đây chỉ nhận dữ liệu công khai
-của engine (`engine.state.board`, `state.revealed_clues`, kết quả `submit_verdict`...)
-và vẽ lại, không tự suy luận gì thêm.
-
-Danh sách component:
-    - Theme: bảng màu, font, hàm vẽ hình chữ nhật bo góc
-    - RoundedButton, Pill, ProgressBar: các control nhỏ vẽ bằng Canvas
-    - CellCard: thẻ nhân vật (lật thẻ, rung khi sai, vòng sáng khi highlight / hint)
-    - BoardPanel: lưới NxN tự co giãn theo cửa sổ, tự dựng lại khi đổi puzzle
-    - InfoPanel: hồ sơ nhân vật đang chọn + nút phán quyết
-    - CluePanel / TracePanel / HistoryPanel / SolverPanel + TabView: cột bên phải
-    - HeaderBar (có Auto solve + SpeedControl), ProgressStrip, Legend, StatusBar, VictoryOverlay
-"""
 from __future__ import annotations
 
 import tkinter as tk
@@ -21,16 +5,11 @@ import tkinter.font as tkfont
 from tkinter import ttk
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
-# Dùng đúng hằng số của engine để UI không bao giờ lệch nhãn trạng thái.
 try:
     from Source.game_engine import STATUS_CRIMINAL, STATUS_INNOCENT, STATUS_UNKNOWN
-except Exception:  # chạy component độc lập (không có package Source)
+except Exception: 
     STATUS_CRIMINAL, STATUS_INNOCENT, STATUS_UNKNOWN = "CRIMINAL", "INNOCENT", "UNKNOWN"
 
-
-# =============================================================================
-# 1. THEME: MÀU SẮC, FONT, TIỆN ÍCH VẼ
-# =============================================================================
 BG = "#F3EDE2"          # nền cửa sổ
 SURFACE = "#FCF9F3"     # nền panel / thẻ chưa lật
 SURFACE_HI = "#EAE1D4"  # nền nổi hơn (hover, thẻ con trong panel)
@@ -41,7 +20,7 @@ MUTED = "#766E67"       # chữ phụ
 DIM = "#524C47"         # chữ mờ
 INK = "#302B28"         # chữ tối đặt trên nền màu sáng
 
-ACCENT = "#248447"      # vùng được manh mối nhắc tới (clue region)
+ACCENT = "#FCB500"      # vùng được manh mối nhắc tới (clue region)
 HINT = "#D49A2A"        # gợi ý
 
 CRIMINAL = "#F35A5A"    # viền / điểm nhấn tội phạm
@@ -50,7 +29,6 @@ CRIMINAL_BG = "#F8C5C3"  # nền thẻ tội phạm
 INNOCENT = "#45A568"     # viền / điểm nhấn vô tội
 INNOCENT_BG = "#E5F0E2"  # nền thẻ vô tội
 
-# Giữ lại tên cũ để code khác (nếu có) vẫn import được.
 PANEL = SURFACE
 UNKNOWN = MUTED
 HIGHLIGHT = HINT
@@ -75,7 +53,6 @@ CLUE_LABELS = {
 
 
 def status_style(cell: Optional[Dict[str, Any]]) -> Dict[str, str]:
-    """Bảng style theo trạng thái công khai của ô (ô chưa lật luôn là UNKNOWN)."""
     if cell and cell.get("is_revealed"):
         return STATUS_STYLE.get(cell.get("status"), STATUS_STYLE[STATUS_UNKNOWN])
     return STATUS_STYLE[STATUS_UNKNOWN]
@@ -87,7 +64,6 @@ def clue_label(clue: Dict[str, Any]) -> str:
 
 
 def mix(a: str, b: str, t: float) -> str:
-    """Pha màu hex a -> b theo tỉ lệ t (0..1)."""
     a, b = a.lstrip("#"), b.lstrip("#")
     out = []
     for i in (0, 2, 4):
@@ -96,7 +72,7 @@ def mix(a: str, b: str, t: float) -> str:
     return "#{:02x}{:02x}{:02x}".format(*out)
 
 
-# ---- Font -------------------------------------------------------------------
+
 _families: Dict[str, str] = {}
 _font_cache: Dict[Any, tkfont.Font] = {}
 
@@ -110,7 +86,6 @@ def _pick_family(candidates: Iterable[str], fallback: str) -> str:
 
 
 def ui_font(size: int = 10, bold: bool = False):
-    """Font giao diện: chọn họ font đẹp nhất có sẵn trên máy."""
     if "ui" not in _families:
         _families["ui"] = _pick_family(
             ("Segoe UI", "SF Pro Text", "Helvetica Neue", "Inter",
@@ -129,13 +104,12 @@ def text_width(text: str, font) -> int:
 
 
 def fit_font(text: str, size: int, bold: bool, max_width: float, min_size: int = 8):
-    """Giảm cỡ chữ cho tới khi `text` vừa `max_width`."""
     while size > min_size and text_width(text, ui_font(size, bold)) > max_width:
         size -= 1
     return ui_font(size, bold)
 
 
-# ---- Hình bo góc ------------------------------------------------------------
+
 def rounded_points(x1: float, y1: float, x2: float, y2: float, r: float) -> List[float]:
     r = max(0.0, min(r, (x2 - x1) / 2, (y2 - y1) / 2))
     return [
@@ -152,14 +126,12 @@ def rounded_rect(canvas: tk.Canvas, x1, y1, x2, y2, r=12, **kw) -> int:
 
 
 def bind_tree(widget: tk.Misc, sequence: str, callback: Callable) -> None:
-    """Gắn sự kiện cho widget và toàn bộ widget con (để cả thẻ đều bấm được)."""
     widget.bind(sequence, callback, add="+")
     for child in widget.winfo_children():
         bind_tree(child, sequence, callback)
 
 
 def auto_wrap(label: tk.Label, container: tk.Misc, margin: int = 0, minimum: int = 80) -> None:
-    """Cho Label tự xuống dòng theo bề rộng của `container`."""
     container.bind(
         "<Configure>",
         lambda e: label.configure(wraplength=max(e.width - margin, minimum)),
@@ -168,7 +140,6 @@ def auto_wrap(label: tk.Label, container: tk.Misc, margin: int = 0, minimum: int
 
 
 def apply_theme(root: tk.Tk) -> None:
-    """Thiết lập nền cửa sổ và style ttk (chỉ scrollbar còn dùng ttk)."""
     root.configure(bg=BG)
     style = ttk.Style(root)
     try:
@@ -190,11 +161,8 @@ def apply_theme(root: tk.Tk) -> None:
     style.map("Dark.Vertical.TScrollbar", background=[("active", DIM), ("pressed", MUTED)])
 
 
-# =============================================================================
-# 2. CONTROL NHỎ: NÚT BO GÓC, PILL, THANH TIẾN ĐỘ
-# =============================================================================
+
 class RoundedButton(tk.Canvas):
-    """Nút phẳng bo góc có hover / pressed / disabled."""
 
     STYLES = {
         "primary": dict(bg=ACCENT, hover="#7ad2ff", press="#35a9e6", fg=INK),
@@ -223,7 +191,6 @@ class RoundedButton(tk.Canvas):
         self.bind("<ButtonRelease-1>", self._on_release)
         self._draw()
 
-    # --- API ---
     def set_enabled(self, enabled: bool) -> None:
         if enabled == self._enabled:
             return
@@ -240,7 +207,6 @@ class RoundedButton(tk.Canvas):
         self._style = self.STYLES[style]
         self._draw()
 
-    # --- sự kiện ---
     def _on_enter(self, _e):
         self._hover = True
         self._draw()
@@ -280,7 +246,6 @@ class RoundedButton(tk.Canvas):
 
 
 class Pill(tk.Canvas):
-    """Nhãn bo tròn (trạng thái, loại manh mối, mã ô...)."""
 
     def __init__(self, master, text: str = "", fill: str = SURFACE_HI, fg: str = TEXT,
                  size: int = 8, surface: str = SURFACE, padx: int = 10, pady: int = 3):
@@ -310,7 +275,6 @@ class Pill(tk.Canvas):
 
 
 class ProgressBar(tk.Canvas):
-    """Thanh tiến độ bo tròn, chạy mượt tới giá trị mới."""
 
     def __init__(self, master, height: int = 8, color: str = ACCENT,
                  track: str = SURFACE_HI, surface: str = BG):
@@ -356,7 +320,6 @@ class ProgressBar(tk.Canvas):
 
 
 class ScrollableFrame(tk.Frame):
-    """Vùng cuộn dọc có scrollbar mảnh; con thêm vào `self.inner`."""
 
     def __init__(self, master, bg: str = SURFACE):
         super().__init__(master, bg=bg)
@@ -397,7 +360,6 @@ class ScrollableFrame(tk.Frame):
         self.canvas.yview_scroll(step * 2, "units")
 
     def reveal(self, widget: tk.Misc) -> None:
-        """Cuộn để `widget` (con trực tiếp của inner) nằm trọn trong vùng nhìn."""
         self.update_idletasks()
         total = max(self.inner.winfo_reqheight(), 1)
         view_h = self.canvas.winfo_height()
@@ -411,12 +373,8 @@ class ScrollableFrame(tk.Frame):
             self.canvas.yview_moveto((y + h - view_h + 10) / total)
 
 
-# =============================================================================
-# 3. THẺ NHÂN VẬT & BẢNG
-# =============================================================================
 def draw_avatar(canvas: tk.Canvas, cx: float, cy: float, r: float,
                 cell: Optional[Dict[str, Any]]) -> None:
-    """Avatar tròn: đặc màu khi đã lật, viền đứt nét khi chưa lật (chưa kết luận)."""
     revealed = bool(cell and cell.get("is_revealed"))
     letter = (str(cell.get("name", "?"))[:1].upper() if cell else "?") or "?"
     size = max(9, int(r * 0.62))
@@ -431,17 +389,6 @@ def draw_avatar(canvas: tk.Canvas, cx: float, cy: float, r: float,
 
 
 class CellCard(tk.Canvas):
-    """Một thẻ nhân vật trên bàn cờ.
-
-    Trạng thái hiển thị:
-      - chưa lật: nền tối, avatar viền đứt, nhãn "Unknown"
-      - đã lật: nền + viền theo CRIMINAL / INNOCENT
-      - selected: viền trắng dày
-      - highlighted: vòng cyan ngoài thẻ (thuộc vùng của manh mối đang xem)
-      - hinted: vòng vàng nhấp nháy
-    Hiệu ứng: lật thẻ khi mở khóa, rung khi phán quyết bị từ chối.
-    """
-
     PAD = 9
     FLIP_FRAMES = 6
     SHAKE = (-4, 4, -3, 3, -2, 2, -1, 1, 0)
@@ -470,11 +417,10 @@ class CellCard(tk.Canvas):
         self.bind("<Configure>", lambda _e: self.redraw())
         self.redraw()
 
-    # --- cập nhật dữ liệu / cờ hiển thị ---
     def update_cell(self, cell: Dict[str, Any], animate: bool = False) -> None:
         if self._flip_job is not None:
             if cell.get("is_revealed"):
-                self._pending = cell          # đang lật: chỉ đổi dữ liệu mặt sau
+                self._pending = cell     
                 return
             self._cancel_flip()
         if (animate and self.cell is not None and cell.get("is_revealed")
@@ -502,7 +448,6 @@ class CellCard(tk.Canvas):
         self._hover = on
         self.redraw()
 
-    # --- hiệu ứng ---
     def _flip_tick(self) -> None:
         n, i = self.FLIP_FRAMES, self._flip_i
         if i < n:
@@ -547,7 +492,6 @@ class CellCard(tk.Canvas):
         self._flip_job = self._shake_job = None
         super().destroy()
 
-    # --- vẽ ---
     def redraw(self) -> None:
         self.delete("all")
         cell = self.cell
@@ -566,7 +510,6 @@ class CellCard(tk.Canvas):
         y1, y2 = pad, h - pad
         r = min(16, half, (y2 - y1) / 2)
 
-        # vòng ngoài: hint (vàng) ưu tiên hơn vùng manh mối (cyan)
         if self.hinted:
             ring = HINT if self._pulse else mix(HINT, BG, 0.55)
             rounded_rect(self, x1 - 4, y1 - 4, x2 + 4, y2 + 4, r + 4, fill="", outline=ring, width=2)
@@ -583,7 +526,7 @@ class CellCard(tk.Canvas):
             edge, edge_w = TEXT, 3
         rounded_rect(self, x1, y1, x2, y2, r, fill=fill, outline=edge, width=edge_w)
 
-        if self._xscale < 0.72:        # đang lật nghiêng: không vẽ chữ
+        if self._xscale < 0.72:  
             return
 
         vw, vh = x2 - x1, y2 - y1
@@ -591,7 +534,6 @@ class CellCard(tk.Canvas):
         tag_pt = max(7, name_pt - 3)
         compact = vh < 100
 
-        # mã ô (góc trái) và chấm trạng thái (góc phải)
         self.create_text(x1 + 14, y1 + 14, text=cell["id"], anchor="w", fill=MUTED,
                          font=ui_font(tag_pt, True))
         dot_x, dot_y = x2 - 16, y1 + 14
@@ -620,7 +562,6 @@ class CellCard(tk.Canvas):
 
 
 class BoardPanel(tk.Frame):
-    """Lưới NxN các CellCard, tự co giãn theo cửa sổ và tự dựng lại khi puzzle đổi."""
 
     ASPECT = 1.12
     MIN_H, MAX_H = 84, 170
@@ -642,7 +583,6 @@ class BoardPanel(tk.Frame):
         self.bind("<Configure>", lambda e: self._fit(e.width, e.height))
         self.rebuild()
 
-    # --- dựng lại toàn bộ lưới (đổi puzzle / restart) ---
     def rebuild(self) -> None:
         self._stop_pulse()
         self._hint = None
@@ -687,9 +627,7 @@ class BoardPanel(tk.Frame):
         for card in self.cells.values():
             card.configure(width=cw, height=ch)
 
-    # --- đồng bộ dữ liệu từ engine ---
     def refresh(self, animate: Optional[str] = None) -> None:
-        """Vẽ lại theo `engine.state.board`; `animate` = mã ô cần lật thẻ."""
         board = self.engine.state.board
         if set(board) != set(self.cells):
             self.rebuild()
@@ -699,7 +637,6 @@ class BoardPanel(tk.Frame):
 
     def set_view(self, selected: Optional[str] = None, highlighted: Iterable[str] = (),
                  hint: Optional[str] = None) -> None:
-        """Cập nhật ô đang chọn, vùng highlight của manh mối và ô được gợi ý."""
         self._selected = selected
         self._highlighted = set(highlighted or ())
         if hint != self._hint:
@@ -719,7 +656,6 @@ class BoardPanel(tk.Frame):
         if card is not None:
             card.shake()
 
-    # --- nhấp nháy ô gợi ý ---
     def _pulse_tick(self) -> None:
         card = self.cells.get(self._hint) if self._hint else None
         if card is None:
@@ -741,17 +677,12 @@ class BoardPanel(tk.Frame):
         super().destroy()
 
 
-# =============================================================================
-# 4. PANEL BÊN PHẢI: HỒ SƠ NHÂN VẬT, MANH MỐI, LỊCH SỬ, SOLVER
-# =============================================================================
 def _panel(master, **kw) -> tk.Frame:
     return tk.Frame(master, bg=SURFACE, highlightthickness=1,
                     highlightbackground=BORDER, highlightcolor=BORDER, **kw)
 
 
 class InfoPanel(tk.Frame):
-    """Hồ sơ nhân vật đang chọn + hai nút phán quyết."""
-
     PAD = 16
 
     def __init__(self, master, on_verdict: Callable[[str], None]):
@@ -818,7 +749,6 @@ class InfoPanel(tk.Frame):
             self._clue_tag_visible = False
 
     def show_cell(self, cell: Optional[Dict[str, Any]], locked: bool = False) -> None:
-        """Hiển thị hồ sơ của `cell` (dict công khai của engine); None = chưa chọn ai."""
         self.avatar.delete("all")
         if not cell:
             draw_avatar(self.avatar, 30, 30, 26, None)
@@ -863,7 +793,6 @@ class InfoPanel(tk.Frame):
 
 
 class ClueCard(tk.Frame):
-    """Một manh mối đã lật; bấm để chọn chủ nhân và highlight vùng của manh mối."""
 
     def __init__(self, master, clue: Dict[str, Any], owner_cell: Optional[Dict[str, Any]],
                  on_click: Callable[[str], None], is_new: bool = False):
@@ -885,7 +814,7 @@ class ClueCard(tk.Frame):
         if is_new:
             Pill(top, "New", fill=ACCENT, fg=INK, surface=SURFACE_HI).pack(side="right", padx=(0, 6))
 
-        text = tk.Label(body, text=clue.get("text", ""), bg=SURFACE_HI, fg="#cfd5e6", justify="left",
+        text = tk.Label(body, text=clue.get("text", ""), bg=SURFACE_HI, fg="#302B28", justify="left",
                         anchor="w", font=ui_font(10), wraplength=300)
         text.pack(fill="x", pady=(8, 0))
         auto_wrap(text, body, margin=4, minimum=100)
@@ -898,7 +827,7 @@ class ClueCard(tk.Frame):
     def _hover(self, on: bool) -> None:
         if self._active:
             return
-        if not on:  # Leave sinh ra cả khi chuột chỉ chuyển sang widget con
+        if not on: 
             try:
                 widget = self.winfo_containing(*self.winfo_pointerxy())
             except (KeyError, tk.TclError):
@@ -916,7 +845,6 @@ class ClueCard(tk.Frame):
 
 
 class CluePanel(tk.Frame):
-    """Danh sách manh mối đã lật (mới nhất ở trên cùng)."""
 
     def __init__(self, master, on_select: Callable[[str], None]):
         super().__init__(master, bg=SURFACE)
@@ -956,7 +884,6 @@ class CluePanel(tk.Frame):
 
 
 class HistoryPanel(tk.Frame):
-    """Nhật ký các phán quyết (kể cả bị từ chối) và gợi ý, mới nhất ở trên."""
 
     KIND_COLOR = {"success": INNOCENT, "warn": HINT, "error": CRIMINAL, "info": ACCENT, "hint": HINT}
 
@@ -988,7 +915,7 @@ class HistoryPanel(tk.Frame):
         tk.Label(top, text=title, bg=SURFACE_HI, fg=color, font=ui_font(10, True)).pack(side="left")
         if step:
             tk.Label(top, text=step, bg=SURFACE_HI, fg=MUTED, font=ui_font(9)).pack(side="right")
-        text = tk.Label(body, text=message, bg=SURFACE_HI, fg="#cfd5e6", justify="left", anchor="w",
+        text = tk.Label(body, text=message, bg=SURFACE_HI, fg="#302B28", justify="left", anchor="w",
                         font=ui_font(10), wraplength=300)
         text.pack(fill="x", pady=(6, 0))
         auto_wrap(text, body, margin=4, minimum=100)
@@ -1013,7 +940,6 @@ class HistoryPanel(tk.Frame):
 
 
 class SolverPanel(tk.Frame):
-    """Số liệu của SAT oracle (DPLL), quy mô KB hiện tại và số biến / mệnh đề CNF."""
 
     TILES = (("sat_calls", "SAT calls"), ("decisions", "Decisions"),
              ("propagations", "Propagations"), ("backtracks", "Backtracks"))
@@ -1062,7 +988,6 @@ class SolverPanel(tk.Frame):
             self._values[key] = value
 
     def update_stats(self, data: Dict[str, Any]) -> None:
-        """Giá trị None hiển thị là "-" (vd số biến CNF chỉ có sau khi chạy Auto solve)."""
         for key, label in self._values.items():
             if key not in data:
                 continue
@@ -1077,7 +1002,6 @@ class SolverPanel(tk.Frame):
 
 
 class TabView(tk.Frame):
-    """Thanh tab phẳng; mỗi tab là một Frame trang."""
 
     def __init__(self, master):
         super().__init__(master, bg=BG)
@@ -1117,8 +1041,6 @@ class TabView(tk.Frame):
 
 
 class SpeedControl(tk.Frame):
-    """Chọn tốc độ Auto solve: Slow / Normal / Fast."""
-
     OPTIONS = ("Slow", "Normal", "Fast")
 
     def __init__(self, master, default: str = "Normal"):
@@ -1146,11 +1068,6 @@ class SpeedControl(tk.Frame):
 
 
 class TracePanel(tk.Frame):
-    """Vết suy diễn (deduction trace) của Auto solve, mới nhất ở trên.
-
-    Mỗi bước hiển thị: số bước / đợt, nhân vật và verdict, manh mối vừa lật,
-    hai truy vấn SAT (KB and not X / KB and X) và số manh mối đang dùng.
-    """
 
     STATE_STYLE = {
         "IDLE": ("Idle", SURFACE_HI, MUTED),
@@ -1203,7 +1120,6 @@ class TracePanel(tk.Frame):
         self.summary.configure(text=text)
 
     def add_step(self, entry: Dict[str, Any], name: str) -> None:
-        """Thêm một bản ghi trace (đúng định dạng của DeductiveAgent.trace)."""
         verdict = entry.get("verdict")
         style = STATUS_STYLE.get(verdict, STATUS_STYLE[STATUS_UNKNOWN])
         cid = str(entry.get("character", ""))
@@ -1230,7 +1146,7 @@ class TracePanel(tk.Frame):
 
         clue_text = entry.get("revealed_clue_text")
         if clue_text:
-            reveal = tk.Label(body, text=f"Revealed: {clue_text}", bg=SURFACE_HI, fg="#cfd5e6",
+            reveal = tk.Label(body, text=f"Revealed: {clue_text}", bg=SURFACE_HI, fg="#302B28",
                               justify="left", anchor="w", font=ui_font(10), wraplength=300)
             reveal.pack(fill="x", pady=(8, 0))
             auto_wrap(reveal, body, margin=4, minimum=100)
@@ -1257,11 +1173,7 @@ class TracePanel(tk.Frame):
         self.scroll.canvas.yview_moveto(0)
 
 
-# =============================================================================
-# 5. KHUNG TỔNG THỂ: HEADER, TIẾN ĐỘ, CHÚ GIẢI, STATUS BAR, MÀN CHIẾN THẮNG
-# =============================================================================
 class Logo(tk.Canvas):
-    """Biểu tượng lưới 3x3: một ô tội phạm, hai ô vô tội, còn lại chưa biết."""
 
     PATTERN = ((0, 2, 0), (1, 0, 0), (0, 0, 1))
 
@@ -1293,7 +1205,6 @@ class HeaderBar(tk.Frame):
         tk.Label(titles, text="Rule on every suspect. No guessing.", bg=BG, fg=MUTED,
                  font=ui_font(9)).pack(anchor="w")
 
-        # pack side="right": nút đầu tiên nằm sát mép phải nhất
         self.auto_button = RoundedButton(inner, "Auto solve", on_auto, style="primary", width=116, height=38)
         self.auto_button.pack(side="right")
         self.hint_button = RoundedButton(inner, "Hint", on_hint, width=84, height=38)
@@ -1310,14 +1221,12 @@ class HeaderBar(tk.Frame):
         self.hint_button.set_enabled(enabled)
 
     def set_auto_state(self, running: bool, enabled: bool = True) -> None:
-        """Khi đang chạy nút trở thành "Stop"."""
         self.auto_button.set_text("Stop" if running else "Auto solve")
         self.auto_button.set_style("danger" if running else "primary")
         self.auto_button.set_enabled(enabled)
 
 
 class ProgressStrip(tk.Frame):
-    """Dải tiến độ phía trên bàn cờ: số ô đã kết luận, số lượt, thanh %."""
 
     def __init__(self, master):
         super().__init__(master, bg=BG)
@@ -1355,7 +1264,6 @@ class Legend(tk.Frame):
 
 
 class StatusBar(tk.Frame):
-    """Thanh trạng thái: chấm màu theo loại thông báo + câu chữ + phím tắt."""
 
     KINDS = {"info": ACCENT, "success": INNOCENT, "warn": HINT, "error": CRIMINAL, "hint": HINT}
     SHORTCUTS = "Arrows move   C criminal   I innocent   H hint   A auto solve   Esc clear"
@@ -1378,7 +1286,6 @@ class StatusBar(tk.Frame):
 
 
 class VictoryOverlay(tk.Frame):
-    """Thẻ chúc mừng nổi giữa bàn cờ khi toàn bộ ô đã được kết luận."""
 
     def __init__(self, master, on_restart: Callable[[], None]):
         super().__init__(master, bg=SURFACE, highlightthickness=2,
@@ -1401,3 +1308,147 @@ class VictoryOverlay(tk.Frame):
 
     def hide(self) -> None:
         self.place_forget()
+
+DIFFICULTY_COLOR = {"easy": INNOCENT, "medium": HINT, "hard": CRIMINAL}
+
+
+class LevelCard(tk.Canvas):
+
+    W, H = 164, 152
+
+    def __init__(self, master, info: Dict[str, Any], on_pick: Callable[[Dict[str, Any]], None],
+                 current: bool = False, solved: bool = False):
+        broken = bool(info.get("error"))
+        super().__init__(master, width=self.W, height=self.H, bg=BG, highlightthickness=0, bd=0,
+                         cursor="arrow" if broken else "hand2")
+        self.info, self.on_pick = info, on_pick
+        self.current, self.solved = current, solved
+        self._hover = False
+        self.bind("<Button-1>", lambda _e: self.on_pick(self.info))
+        self.bind("<Enter>", lambda _e: self._set_hover(True))
+        self.bind("<Leave>", lambda _e: self._set_hover(False))
+        self._draw()
+
+    def _set_hover(self, on: bool) -> None:
+        self._hover = on
+        self._draw()
+
+    def _pill(self, x: float, y: float, text: str, fill: str, fg: str) -> float:
+        font = ui_font(8, True)
+        pw, ph = text_width(text, font) + 16, 18
+        rounded_rect(self, x, y - ph / 2, x + pw, y + ph / 2, ph / 2, fill=fill, outline="")
+        self.create_text(x + pw / 2, y, text=text, fill=fg, font=font)
+        return x + pw
+
+    def _draw(self) -> None:
+        self.delete("all")
+        w, h = self.W, self.H
+        broken = bool(self.info.get("error"))
+        hot = self._hover and not broken
+
+        fill = SURFACE_HI if hot else SURFACE
+        edge = ACCENT if self.current else (DIM if hot else BORDER)
+        rounded_rect(self, 5, 5, w - 5, h - 5, 14, fill=fill, outline=edge,
+                     width=2 if (self.current or hot) else 1)
+
+        self.create_text(20, 26, text=self.info.get("title", ""), anchor="w",
+                         fill=DIM if broken else TEXT, font=ui_font(12, True))
+        if self.solved:
+            self.create_oval(w - 26, 21, w - 16, 31, fill=INNOCENT, outline="")
+            self.create_text(w - 32, 26, text="Solved", anchor="e", fill=INNOCENT, font=ui_font(8, True))
+        elif self.current:
+            self.create_text(w - 20, 26, text="Playing", anchor="e", fill=ACCENT, font=ui_font(8, True))
+
+        size = self.info.get("size")
+        if broken or not size:
+            self.create_text(w / 2, 78, text="Invalid file", fill=CRIMINAL, font=ui_font(10, True))
+            return
+
+        gap = 3
+        s = max(8, min(20, int(68 / size) - gap))
+        total = size * s + (size - 1) * gap
+        x0, y0 = (w - total) / 2, 78 - total / 2
+        starter = self.info.get("starter")
+        for r in range(size):
+            for c in range(size):
+                cid = f"{chr(ord('A') + c)}{r + 1}"
+                x, y = x0 + c * (s + gap), y0 + r * (s + gap)
+                lit = cid == starter
+                rounded_rect(self, x, y, x + s, y + s, 3, fill=ACCENT if lit else SURFACE_HI,
+                             outline="" if lit else BORDER)
+
+        right = self._pill(18, h - 24, f"{size}\u00d7{size}", BORDER, "white")
+        difficulty = str(self.info.get("difficulty") or "").lower()
+        if difficulty:
+            self._pill(right + 6, h - 24, difficulty.capitalize(),
+                       DIFFICULTY_COLOR.get(difficulty, MUTED), INK)
+
+
+class LevelSelectDialog(tk.Toplevel):
+    COLUMNS = 5
+
+    def __init__(self, master, levels: List[Dict[str, Any]], on_select: Callable[[Dict[str, Any]], None],
+                 current: Optional[str] = None, solved: Iterable[str] = (), folder: str = "",
+                 empty_message: str = "No levels found."):
+        super().__init__(master)
+        self.title("Select level")
+        self.configure(bg=BG)
+        self.resizable(False, False)
+        self.transient(master)
+        self._levels = levels
+        self._on_select = on_select
+        solved = set(solved)
+
+        head = tk.Frame(self, bg=BG)
+        head.pack(fill="x", padx=28, pady=(24, 4))
+        tk.Label(head, text="Select a level", bg=BG, fg=TEXT, font=ui_font(18, True)).pack(anchor="w")
+        tk.Label(head, text=folder or f"{len(levels)} levels", bg=BG, fg=MUTED,
+                 font=ui_font(9)).pack(anchor="w", pady=(4, 0))
+
+        body = tk.Frame(self, bg=BG)
+        body.pack(padx=22, pady=(12, 4))
+        if not levels:
+            tk.Label(body, text=empty_message, bg=BG, fg=MUTED, font=ui_font(11),
+                     justify="center").pack(padx=60, pady=50)
+        for i, info in enumerate(levels):
+            card = LevelCard(body, info, self._pick, current=(info.get("path") == current),
+                             solved=(info.get("path") in solved))
+            card.grid(row=i // self.COLUMNS, column=i % self.COLUMNS, padx=6, pady=6)
+
+        footer = tk.Frame(self, bg=BG)
+        footer.pack(fill="x", padx=28, pady=(6, 22))
+        self.note = tk.Label(footer, text="Click a level, or press 1-9 and 0. Esc to close.",
+                             bg=BG, fg=MUTED, font=ui_font(9), anchor="w", justify="left")
+        self.note.pack(side="left")
+        RoundedButton(footer, "Close", self.destroy, width=90, height=34, surface=BG).pack(side="right")
+
+        self.update_idletasks()
+        w, h = self.winfo_reqwidth(), self.winfo_reqheight()
+        x = master.winfo_rootx() + (master.winfo_width() - w) // 2
+        y = master.winfo_rooty() + (master.winfo_height() - h) // 2
+        self.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        self.bind("<Escape>", lambda _e: self.destroy())
+        self.bind("<Key>", self._on_key)
+        try:
+            self.wait_visibility()
+            self.grab_set()
+        except tk.TclError:
+            pass
+        self.focus_set()
+
+    def _pick(self, info: Dict[str, Any]) -> None:
+        if info.get("error"):                      
+            name = str(info.get("path", "")).replace("\\", "/").rsplit("/", 1)[-1]
+            self.note.configure(text=f"{name}: {info['error']}", fg=CRIMINAL)
+            return
+        self.destroy()                             
+        self._on_select(info)
+
+    def _on_key(self, event) -> None:
+        key = str(event.keysym)
+        digit = key[-1] if key[-1:].isdigit() and (key.isdigit() or key.startswith("KP_")) else None
+        if digit is None:
+            return
+        index = 9 if digit == "0" else int(digit) - 1     
+        if index < len(self._levels):
+            self._pick(self._levels[index])

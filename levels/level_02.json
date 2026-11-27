@@ -1,0 +1,145 @@
+{
+  "size": 3,
+  "cells": [
+    {
+      "id": "A1",
+      "name": "Theo",
+      "profession": "Nurse",
+      "status": "INNOCENT",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 0,
+        "region": {
+          "type": "ROW",
+          "params": 2
+        },
+        "text": "Exactly 0 people in Row 2 are Criminals."
+      }
+    },
+    {
+      "id": "B1",
+      "name": "Bea",
+      "profession": "Baker",
+      "status": "CRIMINAL",
+      "is_revealed": false,
+      "clue": {
+        "type": "DIFFERENT",
+        "character1": "B1",
+        "character2": "B2",
+        "text": "Bea (B1) and Otis (B2) have different statuses."
+      }
+    },
+    {
+      "id": "C1",
+      "name": "Nina",
+      "profession": "Tailor",
+      "status": "CRIMINAL",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 1,
+        "region": {
+          "type": "ROW",
+          "params": 3
+        },
+        "text": "Exactly 1 person in Row 3 is a Criminal."
+      }
+    },
+    {
+      "id": "A2",
+      "name": "Jade",
+      "profession": "Baker",
+      "status": "INNOCENT",
+      "is_revealed": false,
+      "clue": {
+        "type": "FACT",
+        "character": "C2",
+        "status": "INNOCENT",
+        "text": "Franz (C2) is Innocent."
+      }
+    },
+    {
+      "id": "B2",
+      "name": "Otis",
+      "profession": "Nurse",
+      "status": "INNOCENT",
+      "is_revealed": true,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 0,
+        "region": {
+          "type": "COL",
+          "params": "A"
+        },
+        "text": "Exactly 0 people in Column A are Criminals."
+      }
+    },
+    {
+      "id": "C2",
+      "name": "Franz",
+      "profession": "Detective",
+      "status": "INNOCENT",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 3,
+        "region": {
+          "type": "NEIGHBORS",
+          "params": "C2"
+        },
+        "text": "Exactly 3 neighbors of Franz (C2) are Criminals."
+      }
+    },
+    {
+      "id": "A3",
+      "name": "Eliza",
+      "profession": "Guard",
+      "status": "INNOCENT",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 0,
+        "region": {
+          "type": "NEIGHBORS",
+          "params": "A3"
+        },
+        "text": "Exactly 0 neighbors of Eliza (A3) are Criminals."
+      }
+    },
+    {
+      "id": "B3",
+      "name": "Roy",
+      "profession": "Cook",
+      "status": "INNOCENT",
+      "is_revealed": false,
+      "clue": {
+        "type": "AT_LEAST",
+        "count": 1,
+        "region": {
+          "type": "NEIGHBORS",
+          "params": "B3"
+        },
+        "text": "At least 1 neighbors of Roy (B3) are Criminals."
+      }
+    },
+    {
+      "id": "C3",
+      "name": "Clara",
+      "profession": "Painter",
+      "status": "CRIMINAL",
+      "is_revealed": false,
+      "clue": {
+        "type": "DIFFERENT",
+        "character1": "C3",
+        "character2": "B3",
+        "text": "Clara (C3) and Roy (B3) have different statuses."
+      }
+    }
+  ],
+  "meta": {
+    "seed": 5028,
+    "size": 3,
+    "level": 2
+  }
+}

@@ -1,31 +1,10 @@
-"""Cửa sổ chính của Griductive.
-
-Lớp `GriductiveApp` chỉ làm "keo dán": nhận thao tác của người chơi, gọi API công khai
-của `GameEngine`, rồi đẩy kết quả sang các component trong `components.py`.
-Không có luật chơi hay suy luận nào nằm ở đây.
-
-API của engine được sử dụng:
-    engine.state.board / .revealed_clues / .moves / .turn / .size / .verdicts
-    engine.submit_verdict(cell_id, status)   -> dict {valid, result, message, ...}
-    engine.get_hint()                        -> dict {character, name, status} | None
-    engine.get_highlighted_cells(cell_id)    -> vùng của manh mối thuộc ô đã lật
-    engine.evaluate_state() / is_game_over() -> tiến độ / kết thúc
-    engine.reset() / load_puzzle(data)       -> Restart / Load puzzle
-    engine.oracle.stats                      -> số liệu SAT solver (DPLL)
-
-Auto solve dùng `Source.agent.DeductiveAgent` (agent.py KHÔNG bị sửa):
-    agent.analyse(state)  -> {consistent, forced[{character, status, queries}], unknown}
-`DeductiveAgent.run()` giải một mạch nên không thể làm animation; vì vậy lớp
-`AutoSolveSession` bên dưới lặp lại đúng logic của run() nhưng mỗi lần chỉ nộp MỘT verdict,
-đồng thời ghi vào agent.trace / agent.waves / agent.terminal như run() vẫn làm.
-"""
 import json
+import re
 import sys
 from pathlib import Path
 
 
 def _ensure_project_root() -> Path:
-    """Tìm thư mục gốc (chứa package `Source`) và đưa vào sys.path."""
     here = Path(__file__).resolve().parent
     for candidate in (here, *here.parents):
         if (candidate / "Source").is_dir():
@@ -60,17 +39,16 @@ from Source.game_engine import (
 
 try:
     from components import (
-        BG, BoardPanel, CluePanel, HeaderBar, HistoryPanel, InfoPanel, Legend,
+        BG, BoardPanel, CluePanel, HeaderBar, HistoryPanel, InfoPanel, Legend, LevelSelectDialog,
         ProgressStrip, SolverPanel, StatusBar, TabView, TracePanel, VictoryOverlay, apply_theme,
     )
-except ImportError:  # chạy dạng package: python -m GUI.main_window
+except ImportError: 
     from .components import (
-        BG, BoardPanel, CluePanel, HeaderBar, HistoryPanel, InfoPanel, Legend,
+        BG, BoardPanel, CluePanel, HeaderBar, HistoryPanel, InfoPanel, Legend, LevelSelectDialog,
         ProgressStrip, SolverPanel, StatusBar, TabView, TracePanel, VictoryOverlay, apply_theme,
     )
 
 
-# Mã kết quả của engine -> (tiêu đề ngắn, loại thông báo của StatusBar / HistoryPanel)
 RESULT_UI = {
     VERDICT_ACCEPTED: ("Ruling accepted", "success"),
     VERDICT_NOT_PROVABLE: ("Not provable yet", "warn"),
@@ -81,11 +59,10 @@ RESULT_UI = {
 }
 
 ARROW_STEPS = {"Left": (-1, 0), "Right": (1, 0), "Up": (0, -1), "Down": (0, 1)}
+LEVEL_DIRS = (PROJECT_ROOT / "levels", Path(__file__).resolve().parent / "levels")
 
-# Thời gian dừng giữa hai bước Auto solve (ms) theo SpeedControl
 AUTO_DELAY_MS = {"Slow": 1300, "Normal": 750, "Fast": 250}
 
-# Trạng thái kết thúc của DeductiveAgent -> (loại thông báo, nội dung)
 AUTO_END = {
     "SOLVED": ("success", "Auto solve finished: every suspect was ruled by logic alone."),
     "STUCK": ("warn", "Auto solve stopped: no remaining verdict is forced by the revealed clues."),
@@ -96,14 +73,6 @@ AUTO_END = {
 
 
 class AutoSolveSession:
-    """Chạy vòng lặp của `DeductiveAgent.run()` từng verdict một.
-
-    - Dùng lại `agent.analyse()` (phân loại bằng SAT) và `engine.submit_verdict()`.
-    - Một "đợt" (wave) = tất cả verdict ép buộc tại thời điểm phân tích; các verdict trong
-      đợt được nộp lần lượt, hết đợt mới phân tích lại, y hệt run().
-    - Bản ghi trace có cùng khoá với run(): step, wave, active_clue_ids, sat_queries,
-      character, verdict, revealed_clue, revealed_clue_text.
-    """
 
     def __init__(self, engine: GameEngine):
         self.engine = engine
@@ -111,7 +80,6 @@ class AutoSolveSession:
         self._queue: list = []
 
     def step(self) -> Optional[Dict[str, Any]]:
-        """Nộp đúng một verdict. Trả về bản ghi trace, hoặc None khi dừng (xem agent.terminal)."""
         agent = self.agent
         if agent.terminal is not None:
             return None
@@ -162,21 +130,24 @@ class GriductiveApp(tk.Tk):
         apply_theme(self)
 
         self.engine = GameEngine()
-        self.selected = None          # mã ô đang chọn, vd "B1"
-        self.hint_cell = None         # mã ô đang được gợi ý
+        self.selected = None         
+        self.hint_cell = None        
         self._victory_job = None
 
-        self.session: Optional[AutoSolveSession] = None   # phiên Auto solve gần nhất
+        self.session: Optional[AutoSolveSession] = None   
         self.auto_running = False
         self._auto_job = None
-        self.agent_stats: Optional[Dict[str, int]] = None  # agent.max_stats của phiên gần nhất
+        self.agent_stats: Optional[Dict[str, int]] = None  
 
         self._build_layout()
         self._bind_keys()
         self.refresh_ui()
         self.status.set("Pick a suspect to read their file. Rule only when the clues prove it.", "info")
 
-    # ------------------------------------------------------------------ layout
+        self.current_level: Optional[str] = None
+        self.completed_levels: set = set()  
+        self._level_dialog = None
+
     def _place_window(self, width: int, height: int) -> None:
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
         width, height = min(width, sw - 80), min(height, sh - 120)
@@ -196,7 +167,6 @@ class GriductiveApp(tk.Tk):
         body.grid_rowconfigure(0, weight=1)
         body.grid_columnconfigure(0, weight=1)
 
-        # --- cột trái: tiến độ, bàn cờ, chú giải ---
         left = tk.Frame(body, bg=BG)
         left.grid(row=0, column=0, sticky="nsew", padx=(24, 12), pady=(16, 14))
         left.grid_rowconfigure(1, weight=1)
@@ -210,7 +180,6 @@ class GriductiveApp(tk.Tk):
         self.legend.grid(row=2, column=0, pady=(6, 0))
         self.victory = VictoryOverlay(left, on_restart=self.restart)
 
-        # --- cột phải: hồ sơ nhân vật + tab Clues / Trace / History / Solver ---
         right = tk.Frame(body, bg=BG, width=400)
         right.grid(row=0, column=1, sticky="ns", padx=(12, 24), pady=(16, 14))
         right.pack_propagate(False)
@@ -237,9 +206,7 @@ class GriductiveApp(tk.Tk):
         self.bind("<Key>", self._on_key)
         self.bind("<Control-o>", lambda _e: self.load_puzzle())
 
-    # ------------------------------------------------------------ đồng bộ UI
     def refresh_ui(self, animate=None) -> None:
-        """Vẽ lại mọi thứ từ trạng thái công khai của engine."""
         state = self.engine.state
         board = state.board
         total = len(board)
@@ -260,7 +227,7 @@ class GriductiveApp(tk.Tk):
         data.update(clues=len(state.revealed_clues), verdicts=len(state.verdicts), hidden=total - solved)
         peak = self.agent_stats or {}
         for key in ("primary_variables", "auxiliary_variables", "clauses"):
-            data[key] = peak.get(key)          # None -> "-" cho tới khi chạy Auto solve
+            data[key] = peak.get(key)        
         self.solver.update_stats(data)
 
         self._update_controls()
@@ -272,7 +239,6 @@ class GriductiveApp(tk.Tk):
         self.header.set_auto_state(self.auto_running, enabled=self.auto_running or not over)
 
     def _sync_view(self) -> None:
-        """Đồng bộ ô đang chọn: hồ sơ, vùng highlight của manh mối, danh sách clue."""
         cid = self.selected
         cell = self.engine.state.board.get(cid) if cid else None
         highlighted = []
@@ -286,7 +252,6 @@ class GriductiveApp(tk.Tk):
         self.board.set_view(selected=cid if cell else None, highlighted=highlighted, hint=self.hint_cell)
         self.clue_panel.set_active(cid if cell is not None and cell.get("is_revealed") else None)
 
-    # --------------------------------------------------------------- thao tác
     def select_cell(self, cid: str) -> None:
         if cid not in self.engine.state.board:
             return
@@ -294,7 +259,6 @@ class GriductiveApp(tk.Tk):
         self._sync_view()
 
     def submit(self, verdict: str) -> None:
-        """Nộp phán quyết CRIMINAL / INNOCENT cho ô đang chọn."""
         if self.auto_running:
             self.status.set("Auto solve is running. Stop it to rule manually.", "warn")
             return
@@ -355,24 +319,64 @@ class GriductiveApp(tk.Tk):
         self.engine.reset()
         self._reset_session("Puzzle restarted.")
 
+    def _levels_dir(self) -> Path:
+        for candidate in LEVEL_DIRS:
+            if candidate.is_dir():
+                return candidate
+        return LEVEL_DIRS[0]
+
+    @staticmethod
+    def _natural_key(path: Path):
+        return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", path.name)]
+
+    def _scan_levels(self) -> list:
+        folder = self._levels_dir()
+        files = sorted((p for p in folder.glob("*.json") if p.name.lower() != "manifest.json"),
+                       key=self._natural_key) if folder.is_dir() else []
+        levels = []
+        for index, path in enumerate(files, start=1):
+            info = {"title": f"Level {index}", "path": str(path), "size": None,
+                    "difficulty": None, "starter": None, "error": None}
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    data = json.load(fh)
+                GameEngine(puzzle_data=data)        
+                meta = data.get("meta")
+                meta = meta if isinstance(meta, dict) else {}
+                info["size"] = int(data.get("size", 3))
+                info["difficulty"] = meta.get("difficulty") or data.get("difficulty")
+                info["starter"] = next(
+                    (c.get("id") for c in data.get("cells", []) if c.get("is_revealed")), None)
+            except Exception as exc:
+                info["error"] = str(exc)
+            levels.append(info)
+        return levels
+
     def load_puzzle(self) -> None:
-        self._stop_auto(announce=False)
-        path = filedialog.askopenfilename(
-            parent=self, title="Load puzzle", initialdir=str(PROJECT_ROOT),
-            filetypes=[("Puzzle JSON", "*.json"), ("All files", "*.*")])
-        if not path:
+        if self._level_dialog is not None and self._level_dialog.winfo_exists():
+            self._level_dialog.lift()
             return
+        self._stop_auto()
+        folder = self._levels_dir()
+        self._level_dialog = LevelSelectDialog(
+            self, self._scan_levels(), on_select=self._load_level,
+            current=self.current_level, solved=self.completed_levels, folder=str(folder),
+            empty_message=f"No level files (*.json) found in:\n{folder}")
+
+    def _load_level(self, info: dict) -> None:
+        path = Path(info["path"])
         try:
             with open(path, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
-            GameEngine(puzzle_data=data)      # dựng thử để bắt lỗi dữ liệu trước khi đụng vào game hiện tại
+            GameEngine(puzzle_data=data)    
         except Exception as exc:
             messagebox.showerror(
-                "Could not load puzzle",
-                f"{Path(path).name}\n\n{exc}\n\nYour current game was not changed.", parent=self)
+                "Could not load level",
+                f"{path.name}\n\n{exc}\n\nYour current game was not changed.", parent=self)
             return
         self.engine.load_puzzle(data)
-        self._reset_session(f"Loaded {Path(path).name}.")
+        self.current_level = str(path)
+        self._reset_session(f"{info['title']} loaded ({path.name}).")
 
     def _reset_session(self, message: str) -> None:
         if self._victory_job is not None:
@@ -390,7 +394,6 @@ class GriductiveApp(tk.Tk):
         self.refresh_ui()
         self.status.set(message, "info")
 
-    # --------------------------------------------------------------- Auto solve
     def toggle_auto_solve(self) -> None:
         if self.auto_running:
             self._stop_auto()
@@ -398,7 +401,6 @@ class GriductiveApp(tk.Tk):
             self.start_auto_solve()
 
     def start_auto_solve(self) -> None:
-        """Chạy DeductiveAgent từng bước: mỗi bước chỉ nộp verdict mà các clue đã lật ép buộc."""
         if self.engine.is_game_over():
             self.status.set("The puzzle is already solved.", "info")
             return
@@ -419,7 +421,7 @@ class GriductiveApp(tk.Tk):
             return
         try:
             entry = self.session.step()
-        except Exception as exc:       # lỗi bất ngờ: dừng hẳn thay vì để chuỗi after chết âm thầm
+        except Exception as exc:    
             self._finish_auto(error=exc)
             return
         if entry is None:
@@ -476,7 +478,6 @@ class GriductiveApp(tk.Tk):
         self.auto_running = False
 
     def _stop_auto(self, announce: bool = True) -> None:
-        """Người dùng dừng Auto solve (nút Stop, Restart, Load). Không làm gì nếu đang không chạy."""
         if not self.auto_running:
             return
         self._cancel_auto()
@@ -490,7 +491,6 @@ class GriductiveApp(tk.Tk):
         self.refresh_ui()
 
     def export_trace(self) -> None:
-        """Lưu deduction trace (và số liệu solver) ra JSON để đưa vào báo cáo."""
         agent = self.session.agent if self.session is not None else None
         if agent is None or not agent.trace:
             self.status.set("Run Auto solve first to record a deduction trace.", "warn")
@@ -519,20 +519,21 @@ class GriductiveApp(tk.Tk):
             return
         self.status.set(f"Trace exported to {Path(path).name}.", "success")
 
-    # --------------------------------------------------------------- chiến thắng
+
     def _schedule_victory(self) -> None:
+        if self.current_level:
+            self.completed_levels.add(self.current_level)   
         if self._victory_job is not None:
             self.after_cancel(self._victory_job)
-        self._victory_job = self.after(560, self._show_victory)   # chờ hiệu ứng lật thẻ xong
+        self._victory_job = self.after(560, self._show_victory)  
 
     def _show_victory(self) -> None:
         self._victory_job = None
         self.victory.show(total=len(self.engine.state.board), turns=self.engine.state.turn)
         self.status.set("Case closed. Every suspect was ruled by logic alone.", "success")
 
-    # ------------------------------------------------------------------ phím tắt
     def _on_key(self, event) -> None:
-        if event.state & 0x4:            # bỏ qua tổ hợp Ctrl+phím (vd Ctrl+C)
+        if event.state & 0x4:            
             return
         key = event.keysym
         if key in ARROW_STEPS:

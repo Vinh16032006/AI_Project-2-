@@ -1,0 +1,151 @@
+{
+  "size": 3,
+  "cells": [
+    {
+      "id": "A1",
+      "name": "Quinn",
+      "profession": "Guard",
+      "status": "CRIMINAL",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 2,
+        "region": {
+          "type": "ROW",
+          "params": 3
+        },
+        "text": "Exactly 2 people in Row 3 are Criminals."
+      }
+    },
+    {
+      "id": "B1",
+      "name": "Victor",
+      "profession": "Pilot",
+      "status": "INNOCENT",
+      "is_revealed": false,
+      "clue": {
+        "type": "SAME",
+        "character1": "B1",
+        "character2": "A2",
+        "text": "Victor (B1) and Theo (A2) have the same statuses."
+      }
+    },
+    {
+      "id": "C1",
+      "name": "Kobe",
+      "profession": "Writer",
+      "status": "INNOCENT",
+      "is_revealed": false,
+      "clue": {
+        "type": "AT_LEAST",
+        "count": 1,
+        "region": {
+          "type": "NEIGHBORS",
+          "params": "C1"
+        },
+        "text": "At least 1 neighbors of Kobe (C1) are Criminals."
+      }
+    },
+    {
+      "id": "A2",
+      "name": "Theo",
+      "profession": "Pilot",
+      "status": "INNOCENT",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 2,
+        "region": {
+          "type": "COL",
+          "params": "A"
+        },
+        "text": "Exactly 2 people in Column A are Criminals."
+      }
+    },
+    {
+      "id": "B2",
+      "name": "Franz",
+      "profession": "Astronaut",
+      "status": "CRIMINAL",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 2,
+        "region": {
+          "type": "ROW",
+          "params": 3
+        },
+        "text": "Exactly 2 people in Row 3 are Criminals."
+      }
+    },
+    {
+      "id": "C2",
+      "name": "Nina",
+      "profession": "Painter",
+      "status": "CRIMINAL",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 1,
+        "region": {
+          "type": "ROW",
+          "params": 1
+        },
+        "text": "Exactly 1 person in Row 1 is a Criminal."
+      }
+    },
+    {
+      "id": "A3",
+      "name": "Roy",
+      "profession": "Farmer",
+      "status": "CRIMINAL",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 2,
+        "region": {
+          "type": "NEIGHBORS",
+          "params": "A3"
+        },
+        "text": "Exactly 2 neighbors of Roy (A3) are Criminals."
+      }
+    },
+    {
+      "id": "B3",
+      "name": "Otis",
+      "profession": "Detective",
+      "status": "CRIMINAL",
+      "is_revealed": false,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 1,
+        "region": {
+          "type": "ROW",
+          "params": 1
+        },
+        "text": "Exactly 1 person in Row 1 is a Criminal."
+      }
+    },
+    {
+      "id": "C3",
+      "name": "Gina",
+      "profession": "Painter",
+      "status": "INNOCENT",
+      "is_revealed": true,
+      "clue": {
+        "type": "EXACTLY",
+        "count": 3,
+        "region": {
+          "type": "NEIGHBORS",
+          "params": "C3"
+        },
+        "text": "Exactly 3 neighbors of Gina (C3) are Criminals."
+      }
+    }
+  ],
+  "meta": {
+    "seed": 5030,
+    "size": 3,
+    "level": 4
+  }
+}
